@@ -71,13 +71,22 @@ send_stats (ProgId, Context, Stats) ->
                   { ?LWES_U_INT_16, "num", StatsNum },
                   lists:zipwith (
                     fun (I, {K, V}) ->
-                        [ {?LWES_STRING,
-                            "k"++integer_to_list(I), to_string (K)},
-                          {?LWES_INT_64,
-                            "v"++integer_to_list(I), V}
-                        ]
+                          [ {?LWES_STRING,
+                              "k"++integer_to_list(I), to_string (K)},
+                            {?LWES_INT_64,
+                              "v"++integer_to_list(I), V}
+                          ];
+                        (I, {T, K, V}) ->
+                          [ {?LWES_STRING,
+                              "k"++integer_to_list(I), to_string (K)},
+                            {?LWES_INT_64,
+                              "v"++integer_to_list(I), V},
+                            {?LWES_STRING,
+                              "t"++integer_to_list(I), to_string (T)}
+                          ]
                     end, lists:seq (0, StatsNum - 1), Stats),
-                  { ?LWES_U_INT_16, "ctxt_num", ContextNum },
+                  % add 1 for host
+                  { ?LWES_U_INT_16, "ctxt_num", ContextNum + 1 },
                   lists:zipwith (
                     fun (I, {K, V}) ->
                         [ {?LWES_STRING,
@@ -108,7 +117,7 @@ log_to_mondemand () ->
                   proplists:delete (?PROG_ID, C),
                   % iterate through all the keys pulling out each for this
                   % context
-                  [ { K, V } || { { C2, K }, V } <- All, C2 =:= C ])
+                  [ { counter, K, V } || { { C2, K }, V } <- All, C2 =:= C ])
     end
     || C <- lists:usort ([CK || { { CK, _ }, _ } <- All])
   ],
