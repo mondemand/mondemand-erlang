@@ -2,7 +2,7 @@
 # variable FW_PACKAGE_DEFAULT_MAINTAINER if non-empty at init time
 
 FW_PACKAGE_NAME="mondemand-erlang"
-FW_PACKAGE_VERSION="1.3.0"
+FW_PACKAGE_VERSION="4.0.0"
 FW_PACKAGE_MAINTAINER="mondemand-devel@lists.sourceforge.net"
 FW_PACKAGE_SHORT_DESCRIPTION="Erlang Mondemand Bindings."
 FW_PACKAGE_DESCRIPTION=`cat README`
@@ -14,13 +14,13 @@ FW_PACKAGE_ARCHITECTURE_DEPENDENT="1"
 # 
 # For other packaging systems, the syntax is translated for you.
 
-FW_PACKAGE_DEPENDS="lwes-erlang"
+FW_PACKAGE_DEPENDS="lwes-erlang (>= 1.0.0)"
 FW_PACKAGE_CONFLICTS="mondemand_erl"
 FW_PACKAGE_PROVIDES=""
 FW_PACKAGE_REPLACES="mondemand_erl"
 FW_PACKAGE_SUGGESTS=""
 
-FW_PACKAGE_BUILD_DEPENDS="lwes-erlang"
+FW_PACKAGE_BUILD_DEPENDS="lwes-erlang (>= 1.0.0)"
 FW_PACKAGE_BUILD_CONFLICTS=""
 
 # dupload is used for submitting debian packages to a package archive
