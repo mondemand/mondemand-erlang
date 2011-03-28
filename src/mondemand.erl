@@ -16,8 +16,8 @@
            all/0,
            get_lwes_config/0,
            log_to_mondemand/0,
-           send_trace/2,
-           send_trace/4,
+           send_trace/3,
+           send_trace/5,
            send_stats/3,
            reset_stats/0,
            reload_config/0,
@@ -57,6 +57,7 @@
 -define (OWNER_ID_KEY, "mondemand.owner").
 -define (PROG_ID_KEY,  "mondemand.prog_id").
 -define (SRC_HOST_KEY, "mondemand.src_host").
+-define (MESSAGE_KEY,  "mondemand.message").
 
 %%====================================================================
 %% API
@@ -114,7 +115,7 @@ get_lwes_config () ->
 all () ->
   ets:tab2list (?TABLE).
 
-send_trace (ProgId, Context) ->
+send_trace (ProgId, Message, Context) ->
   case Context of
     Dict when is_tuple (Context) andalso element (1, Context) =:= dict ->
       case key_in_dict (?TRACE_ID_KEY, Dict)
@@ -125,7 +126,8 @@ send_trace (ProgId, Context) ->
               name = ?TRACE_EVENT,
               attrs = dict:store (?PROG_ID_KEY, ProgId,
                         dict:store (?SRC_HOST_KEY, net_adm:localhost(),
-                                    Dict))
+                          dict:store (?MESSAGE_KEY, Message,
+                                      Dict)))
             });
         false ->
           {error, required_fields_not_set}
@@ -138,7 +140,8 @@ send_trace (ProgId, Context) ->
               #lwes_event {
                 name = ?TRACE_EVENT,
                 attrs = [ {?SRC_HOST_KEY, net_adm:localhost() },
-                          {?PROG_ID_KEY, ProgId}
+                          {?PROG_ID_KEY, ProgId},
+                          {?MESSAGE_KEY, Message}
                           | List ]
               });
           false ->
@@ -148,26 +151,28 @@ send_trace (ProgId, Context) ->
       {error, context_format_not_recognized}
   end.
 
-send_trace (ProgId, TraceId, Owner, Context) ->
+send_trace (ProgId, Owner, TraceId, Message, Context) ->
   case Context of
     Dict when is_tuple (Context) andalso element (1, Context) =:= dict ->
       send_event (
         #lwes_event {
           name = ?TRACE_EVENT,
           attrs = dict:store (?PROG_ID_KEY, ProgId,
-                    dict:store (?TRACE_ID_KEY, TraceId,
-                      dict:store (?OWNER_ID_KEY, Owner,
+                    dict:store (?OWNER_ID_KEY, Owner,
+                      dict:store (?TRACE_ID_KEY, TraceId,
                         dict:store (?SRC_HOST_KEY, net_adm:localhost(),
-                                    Dict))))
+                          dict:store (?MESSAGE_KEY, Message,
+                                      Dict)))))
         });
     List when is_list (Context) ->
       send_event (
         #lwes_event {
           name = ?TRACE_EVENT,
           attrs = [ { ?PROG_ID_KEY, ProgId },
-                    { ?TRACE_ID_KEY, TraceId },
                     { ?OWNER_ID_KEY, Owner },
-                    { ?SRC_HOST_KEY, net_adm:localhost() }
+                    { ?TRACE_ID_KEY, TraceId },
+                    { ?SRC_HOST_KEY, net_adm:localhost() },
+                    { ?MESSAGE_KEY, Message }
                     | List ]
         });
     _ ->
