@@ -1,4 +1,0 @@
-TESTS = 		\
-  module-mondemand_app \
-  module-mondemand_sup \
-  module-mondemand

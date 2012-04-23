@@ -1,0 +1,13 @@
+{ application, mondemand,
+  [
+   { description, "Erlang Mondemand Bindings." },
+   { vsn, "4.0.0" },
+   { modules, [] },
+   { registered, [mondemand,mondemand_sup]},
+   { applications, [kernel,stdlib,lwes]},
+   { env, [ { config_file,"/etc/mondemand/mondemand.conf"}]},
+   { mod,
+     { mondemand_app, []}
+   }
+  ]
+}.
