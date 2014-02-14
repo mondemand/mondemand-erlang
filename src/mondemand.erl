@@ -22,7 +22,8 @@
            reset_stats/0,
            reload_config/0,
            restart/0,
-           current_config/0
+           current_config/0,
+           stats/0
          ]).
 
 %% gen_server callbacks
@@ -114,6 +115,26 @@ get_lwes_config () ->
 
 all () ->
   ets:tab2list (?TABLE).
+
+stats () ->
+  io:format ("~-21s ~-35s ~-20s~n",["prog_id", "key", "value"]),
+  io:format ("~-21s ~-35s ~-20s~n",["---------------------",
+                                    "-----------------------------------",
+                                    "--------------------"]),
+  [
+    io:format ("~-21s ~-35s ~-20b~n",
+               [stringify (proplists:get_value ("prog_id",Context,"unknown")),
+                stringify (Key),
+                Value])
+    || {{Context,Key},Value}
+    <- lists:sort (ets:tab2list (?TABLE))
+  ],
+  ok.
+
+stringify (A) when is_atom (A) ->
+  atom_to_list (A);
+stringify (L) ->
+  L.
 
 send_trace (ProgId, Message, Context) ->
   case Context of
