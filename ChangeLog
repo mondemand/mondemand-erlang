@@ -1,3 +1,6 @@
+Version 4.1.1 (molinaro)
+  * updated dependency on version of lwes
+
 Version 4.1.0 (molinaro)
   * added a mondemand:stats/0 function to pretty-print stats
   * updated dependency on version of lwes
