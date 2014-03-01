@@ -35,7 +35,7 @@
             code_change/3
           ]).
 
--record (state, {config, table, timer, channel}).
+-record (state, {config, table, timer, channel, http_config}).
 
 -define (TABLE, mondemand_stats).
 
@@ -113,6 +113,28 @@ get_lwes_config () ->
       end
   end.
 
+get_http_config () ->
+  case application:get_env (mondemand, http_endpoint) of
+    {ok, HttpConfig} ->
+      HttpConfig;
+    undefined ->
+      case application:get_env (mondemand, config_file) of
+        {ok, File} ->
+          case file:read_file (File) of
+            {ok, Bin} ->
+              {match, [TraceEndPoint]} = 
+                 re:run (Bin, "MONDEMAND_HTTP_ENDPOINT_TRACE=\"([^\"]+)\"",
+                              [{capture, all_but_first, list}]),
+              [{trace, TraceEndPoint}];
+            E ->
+              E
+          end;
+        undefined ->
+          {error, no_http_configured}
+      end
+  end.
+
+
 all () ->
   ets:tab2list (?TABLE).
 
@@ -137,7 +159,8 @@ stringify (L) ->
   L.
 
 send_trace (ProgId, Message, Context) ->
-  case Context of
+  Context2 = split_heavy_contexts (Context), 
+  case Context2 of
     Dict when is_tuple (Context) andalso element (1, Context) =:= dict ->
       case key_in_dict (?TRACE_ID_KEY, Dict)
         andalso key_in_dict (?OWNER_ID_KEY, Dict) of
@@ -173,7 +196,8 @@ send_trace (ProgId, Message, Context) ->
   end.
 
 send_trace (ProgId, Owner, TraceId, Message, Context) ->
-  case Context of
+  Context2 = split_heavy_contexts (Context),
+  case Context2 of
     Dict when is_tuple (Context) andalso element (1, Context) =:= dict ->
       send_event (
         #lwes_event {
@@ -279,6 +303,12 @@ current_config () ->
 %% gen_server callbacks
 %%====================================================================
 init([]) ->
+  HttpConfig =
+    case get_http_config () of 
+      {error, _} -> undefined;
+      HC -> HC
+    end,           
+  
   case get_lwes_config () of
     {error, Error} ->
       {stop, {error, Error}};
@@ -296,7 +326,8 @@ init([]) ->
               config = Config,
               table = TabId,
               timer = TRef,
-              channel = Channel
+              channel = Channel,
+              http_config = HttpConfig
             }
           };
         {error, Error} ->
@@ -330,9 +361,23 @@ handle_call (_Request, _From, State) ->
   {reply, ok, State}.
 
 % send an event
-handle_cast ({send, Event}, State = #state { channel = Channel }) ->
-  lwes:emit (Channel, Event),
+handle_cast ({send, Event}, 
+             State = #state { channel = Channel,
+                              http_config = HttpConfig}) ->
+  {lwes_event, EventName, Attrs} = Event,
+  error_logger:info_msg("Event is ~p~n", [Event]),
+  case EventName of 
+    "MonDemand::TraceMsg" 
+      -> Bin = lwes_event:to_binary(Event),
+         error_logger:info_msg("The size of the event ~p~n", [Bin]),
+         case size(Bin) of 
+           X when X > 65535 -> post_via_http (Bin, HttpConfig);
+           _ -> lwes:emit (Channel, Event)
+         end; 
+     _ -> lwes:emit (Channel, Event)
+  end,
   {noreply, State};
+
 % fallback
 handle_cast (_Request, State) ->
   {noreply, State}.
@@ -351,6 +396,52 @@ code_change (_OldVsn, State, _Extra) ->
 %%====================================================================
 send_event (Event) ->
   gen_server:cast (?MODULE, {send, Event}).
+
+post_via_http(Bin, HttpConfig) ->
+  case HttpConfig of 
+    undefined -> ok;
+    _ -> Endpoint = proplists:get_value("trace", HttpConfig), 
+         error_logger:info_msg("Calling ~p~n", [Endpoint]),
+         timer:sleep(5000),
+         httpc:request
+                  (post,
+                   {Endpoint, [], "", Bin},
+                   [], [])
+  end.
+
+split_heavy_contexts (Context) when is_tuple (Context) ->
+  dict:from_list (
+    split_heavy_contexts (
+      dict:to_list (Context))); 
+split_heavy_contexts (Context) -> 
+  lists:foldl (
+    fun ({K, V}, A) 
+      -> case V of 
+           B when is_binary(B) -> A ++ split_chunk (K, V, 50000, 0);
+           O -> A ++ [{K, O}]  
+         end
+    end,
+    [], 
+    Context).                    
+                      
+split_chunk (_, <<>>, _, _) -> [];
+split_chunk (FieldName, Bin, ChunkSize, PartIndex) 
+                       when size(Bin) =< ChunkSize ->
+  case PartIndex of 
+    0 -> [{FieldName, Bin}];
+    _ -> [{part_name(FieldName, PartIndex), Bin}]
+  end; 
+
+split_chunk (FieldName, Bin, ChunkSize, PartIndex) -> 
+  { Chunk, Rest} = split_binary (Bin, ChunkSize),
+  [ {part_name(FieldName, PartIndex), Chunk} | 
+      split_chunk (FieldName, Rest, ChunkSize, PartIndex + 1) ]. 
+
+part_name (Name, Part) when is_binary (Name) ->
+  list_to_binary (
+    part_name (binary_to_list (Name), Part));
+part_name (Name, Part) ->
+  Name ++ "-" ++ integer_to_list (Part).
 
 to_string (In) when is_list (In) ->
   In;
