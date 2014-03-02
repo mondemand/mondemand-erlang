@@ -365,11 +365,9 @@ handle_cast ({send, Event},
              State = #state { channel = Channel,
                               http_config = HttpConfig}) ->
   {lwes_event, EventName, Attrs} = Event,
-  error_logger:info_msg("Event is ~p~n", [Event]),
   case EventName of 
     "MonDemand::TraceMsg" 
       -> Bin = lwes_event:to_binary(Event),
-         error_logger:info_msg("The size of the event ~p~n", [Bin]),
          case size(Bin) of 
            X when X > 65535 -> post_via_http (Bin, HttpConfig);
            _ -> lwes:emit (Channel, Event)
@@ -401,8 +399,6 @@ post_via_http(Bin, HttpConfig) ->
   case HttpConfig of 
     undefined -> ok;
     _ -> Endpoint = proplists:get_value("trace", HttpConfig), 
-         error_logger:info_msg("Calling ~p~n", [Endpoint]),
-         timer:sleep(5000),
          httpc:request
                   (post,
                    {Endpoint, [], "", Bin},
