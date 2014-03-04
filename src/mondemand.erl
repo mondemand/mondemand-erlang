@@ -164,21 +164,6 @@ send_trace (ProgId, Message, Context)
 send_trace (ProgId, Message, Context) ->
   Context2 = mark_large_binaries (Context), 
   case Context2 of
-    Dict when is_tuple (Context) andalso element (1, Context) =:= dict ->
-      case key_in_dict (?TRACE_ID_KEY, Dict)
-        andalso key_in_dict (?OWNER_ID_KEY, Dict) of
-        true ->
-          send_event (
-            #lwes_event {
-              name = ?TRACE_EVENT,
-              attrs = dict:store (?PROG_ID_KEY, ProgId,
-                        dict:store (?SRC_HOST_KEY, net_adm:localhost(),
-                          dict:store (?MESSAGE_KEY, Message,
-                                      Dict)))
-            });
-        false ->
-          {error, required_fields_not_set}
-      end;
     List when is_list (Context) ->
       case key_in_list (?TRACE_ID_KEY, List)
         andalso key_in_list (?OWNER_ID_KEY, List) of
@@ -418,11 +403,6 @@ to_string (In) when is_atom (In) ->
   atom_to_list (In);
 to_string (In) when is_integer (In) ->
   integer_to_list (In).
-
-key_in_dict (Key, Dict) when is_list (Key) ->
-  dict:is_key (Key, Dict)
-    orelse dict:is_key (list_to_binary(Key), Dict)
-    orelse dict:is_key (list_to_atom(Key), Dict).
 
 key_in_list (Key, List) when is_list (Key), is_list (List) ->
   proplists:is_defined (Key, List)
