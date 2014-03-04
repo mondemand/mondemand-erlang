@@ -158,8 +158,11 @@ stringify (A) when is_atom (A) ->
 stringify (L) ->
   L.
 
+send_trace (ProgId, Message, Context) 
+                      when is_tuple (Context) andalso element (1, Context) =:= dict -> 
+  send_trace (ProgId, Message, dict:to_list (Context));
 send_trace (ProgId, Message, Context) ->
-  Context2 = split_heavy_contexts (Context), 
+  Context2 = mark_large_binaries (Context), 
   case Context2 of
     Dict when is_tuple (Context) andalso element (1, Context) =:= dict ->
       case key_in_dict (?TRACE_ID_KEY, Dict)
@@ -195,20 +198,12 @@ send_trace (ProgId, Message, Context) ->
       {error, context_format_not_recognized}
   end.
 
+send_trace (ProgId, Owner, TraceId, Message, Context)
+                     when is_tuple (Context) andalso element (1, Context) =:= dict ->
+  send_trace (ProgId, Owner, TraceId, Message, dict:to_list (Context));
 send_trace (ProgId, Owner, TraceId, Message, Context) ->
-  Context2 = split_heavy_contexts (Context),
+  Context2 = mark_large_binaries (Context),
   case Context2 of
-    Dict when is_tuple (Context) andalso element (1, Context) =:= dict ->
-      send_event (
-        #lwes_event {
-          name = ?TRACE_EVENT,
-          attrs = dict:store (?PROG_ID_KEY, ProgId,
-                    dict:store (?OWNER_ID_KEY, Owner,
-                      dict:store (?TRACE_ID_KEY, TraceId,
-                        dict:store (?SRC_HOST_KEY, net_adm:localhost(),
-                          dict:store (?MESSAGE_KEY, Message,
-                                      Dict)))))
-        });
     List when is_list (Context) ->
       send_event (
         #lwes_event {
@@ -361,10 +356,10 @@ handle_call (_Request, _From, State) ->
   {reply, ok, State}.
 
 % send an event
-handle_cast ({send, Event}, 
+handle_cast ({send,
+              Event = #lwes_event { name = EventName }},
              State = #state { channel = Channel,
                               http_config = HttpConfig}) ->
-  {lwes_event, EventName, Attrs} = Event,
   case EventName of 
     "MonDemand::TraceMsg" 
       -> Bin = lwes_event:to_binary(Event),
@@ -398,46 +393,24 @@ send_event (Event) ->
 post_via_http(Bin, HttpConfig) ->
   case HttpConfig of 
     undefined -> ok;
-    _ -> Endpoint = proplists:get_value("trace", HttpConfig), 
+    _ -> Endpoint = proplists:get_value (trace, HttpConfig), 
          httpc:request
                   (post,
                    {Endpoint, [], "", Bin},
                    [], [])
   end.
 
-split_heavy_contexts (Context) when is_tuple (Context) ->
-  dict:from_list (
-    split_heavy_contexts (
-      dict:to_list (Context))); 
-split_heavy_contexts (Context) -> 
-  lists:foldl (
+mark_large_binaries (Context) -> 
+  lists:foldl(
     fun ({K, V}, A) 
-      -> case V of 
-           B when is_binary(B) -> A ++ split_chunk (K, V, 50000, 0);
-           O -> A ++ [{K, O}]  
+      -> case iolist_size (V) of 
+           N when N > 61440 
+             -> [ {?LWES_LARGE_BINARY, K, V} | A ];
+           _ -> [ {K, V} | A ]
          end
     end,
-    [], 
-    Context).                    
-                      
-split_chunk (_, <<>>, _, _) -> [];
-split_chunk (FieldName, Bin, ChunkSize, PartIndex) 
-                       when size(Bin) =< ChunkSize ->
-  case PartIndex of 
-    0 -> [{FieldName, Bin}];
-    _ -> [{part_name(FieldName, PartIndex), Bin}]
-  end; 
-
-split_chunk (FieldName, Bin, ChunkSize, PartIndex) -> 
-  { Chunk, Rest} = split_binary (Bin, ChunkSize),
-  [ {part_name(FieldName, PartIndex), Chunk} | 
-      split_chunk (FieldName, Rest, ChunkSize, PartIndex + 1) ]. 
-
-part_name (Name, Part) when is_binary (Name) ->
-  list_to_binary (
-    part_name (binary_to_list (Name), Part));
-part_name (Name, Part) ->
-  Name ++ "-" ++ integer_to_list (Part).
+    [],
+    Context).    
 
 to_string (In) when is_list (In) ->
   In;

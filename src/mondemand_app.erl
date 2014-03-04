@@ -47,7 +47,7 @@ stop(_State) ->
 %% Description: Starts apps this depends on, then starts this
 %%--------------------------------------------------------------------
 start() ->
-    [application:start(App) || App <- [sasl, lwes, mondemand]].
+    [application:start(App) || App <- [sasl, lwes, inets,  mondemand]].
 
 %%--------------------------------------------------------------------
 %%% Test functions
