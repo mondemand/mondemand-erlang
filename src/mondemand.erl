@@ -377,7 +377,7 @@ post_via_http(Bin, HttpConfig) ->
   case HttpConfig of 
     undefined -> ok;
     _ -> Endpoint = proplists:get_value (trace, HttpConfig), 
-         httpc:request
+         {ok, _ } = httpc:request
                   (post,
                    {Endpoint, [], "", Bin},
                    [], [])
