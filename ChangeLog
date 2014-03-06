@@ -1,3 +1,7 @@
+Version 4.1.2 (vikramkadi)
+  * now able to post traces over 65kb
+  * updated the version of lwes dependency to support long strings
+
 Version 4.1.1 (molinaro)
   * updated dependency on version of lwes
 
