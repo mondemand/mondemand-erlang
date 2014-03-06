@@ -162,8 +162,7 @@ send_trace (ProgId, Message, Context)
                       when is_tuple (Context) andalso element (1, Context) =:= dict -> 
   send_trace (ProgId, Message, dict:to_list (Context));
 send_trace (ProgId, Message, Context) ->
-  Context2 = mark_large_binaries (Context), 
-  case Context2 of
+  case Context of
     List when is_list (Context) ->
       case key_in_list (?TRACE_ID_KEY, List)
         andalso key_in_list (?OWNER_ID_KEY, List) of
@@ -187,8 +186,7 @@ send_trace (ProgId, Owner, TraceId, Message, Context)
                      when is_tuple (Context) andalso element (1, Context) =:= dict ->
   send_trace (ProgId, Owner, TraceId, Message, dict:to_list (Context));
 send_trace (ProgId, Owner, TraceId, Message, Context) ->
-  Context2 = mark_large_binaries (Context),
-  case Context2 of
+  case Context of
     List when is_list (Context) ->
       send_event (
         #lwes_event {
@@ -384,18 +382,6 @@ post_via_http(Bin, HttpConfig) ->
                    {Endpoint, [], "", Bin},
                    [], [])
   end.
-
-mark_large_binaries (Context) -> 
-  lists:foldl(
-    fun ({K, V}, A) 
-      -> case iolist_size (V) of 
-           N when N > 61440 
-             -> [ {?LWES_LARGE_BINARY, K, V} | A ];
-           _ -> [ {K, V} | A ]
-         end
-    end,
-    [],
-    Context).    
 
 to_string (In) when is_list (In) ->
   In;
