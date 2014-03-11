@@ -344,7 +344,7 @@ handle_cast ({send,
              State = #state { channel = Channel,
                               http_config = HttpConfig}) ->
   case EventName of 
-    "MonDemand::TraceMsg" 
+    ?TRACE_EVENT 
       -> Bin = lwes_event:to_binary(Event),
          case size(Bin) of 
            X when X > 65535 -> post_via_http (Bin, HttpConfig);
