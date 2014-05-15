@@ -1,11 +1,15 @@
 { application, mondemand,
   [
    { description, "Erlang Mondemand Bindings." },
-   { vsn, "4.1.2" },
+   { vsn, "5.0.0" },
    { modules, [] },
    { registered, [mondemand,mondemand_sup]},
    { applications, [kernel,stdlib,lwes]},
-   { env, [ { config_file,"/etc/mondemand/mondemand.conf"}]},
+   { env, [
+       { config_file,"/etc/mondemand/mondemand.conf"},
+       { send_interval, 60 }
+     ]
+   },
    { mod,
      { mondemand_app, []}
    }

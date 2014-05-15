@@ -2,9 +2,7 @@
 
 -include_lib ("lwes/include/lwes.hrl").
 
--ifdef(HAVE_EUNIT).
--include_lib("eunit/include/eunit.hrl").
--endif.
+-compile({parse_transform, ct_expand}).
 
 -behaviour (gen_server).
 
@@ -23,7 +21,12 @@
            reload_config/0,
            restart/0,
            current_config/0,
-           stats/0
+           stats/0,
+           stat_key/1,
+           stat_val/1,
+           stat_type/1,
+           ctxt_key/1,
+           ctxt_val/1
          ]).
 
 %% gen_server callbacks
@@ -35,9 +38,10 @@
             code_change/3
           ]).
 
--record (state, {config, table, timer, channel}).
+-record (state, {config, interval, delay, table, timer, channel}).
 
 -define (TABLE, mondemand_stats).
+-define (DEFAULT_SEND_INTERVAL, 60).
 
 -define (STATS_EVENT, "MonDemand::StatsMsg").
 -define (TRACE_EVENT, "MonDemand::TraceMsg").
@@ -60,13 +64,9 @@
 -define (SRC_HOST_KEY, "mondemand.src_host").
 -define (MESSAGE_KEY,  "mondemand.message").
 
-%%====================================================================
-%% API
-%%====================================================================
-%%--------------------------------------------------------------------
-%% Function: start_link() -> {ok,Pid} | ignore | {error,Error}
-%% Description: Starts the server
-%%--------------------------------------------------------------------
+%-=====================================================================-
+%-                                  API                                -
+%-=====================================================================-
 start_link() ->
   gen_server:start_link ({local, ?MODULE}, ?MODULE, [], []).
 
@@ -122,19 +122,22 @@ stats () ->
                                     "-----------------------------------",
                                     "--------------------"]),
   [
-    io:format ("~-21s ~-35s ~-20b~n",
-               [stringify (proplists:get_value ("prog_id",Context,"unknown")),
-                stringify (Key),
-                Value])
+    begin
+      io:format ("~-21s ~-35s ~-20b~n",
+                 [stringify (proplists:get_value ("prog_id",Context,"unknown")),
+                  stringify (Key),
+                  Value]),
+      lists:foreach (fun ({"prog_id",_}) ->
+                           ok;
+                         ({CKey, CValue}) ->
+                           io:format (" {~s, ~s}~n", [stringify (CKey),
+                                                      stringify (CValue)])
+                     end, Context)
+    end
     || {{Context,Key},Value}
     <- lists:sort (ets:tab2list (?TABLE))
   ],
   ok.
-
-stringify (A) when is_atom (A) ->
-  atom_to_list (A);
-stringify (L) ->
-  L.
 
 send_trace (ProgId, Message, Context) ->
   case Context of
@@ -160,10 +163,12 @@ send_trace (ProgId, Message, Context) ->
             send_event (
               #lwes_event {
                 name = ?TRACE_EVENT,
-                attrs = [ {?SRC_HOST_KEY, net_adm:localhost() },
-                          {?PROG_ID_KEY, ProgId},
-                          {?MESSAGE_KEY, Message}
-                          | List ]
+                attrs = dict:from_list (
+                          [ {?SRC_HOST_KEY, net_adm:localhost() },
+                            {?PROG_ID_KEY, ProgId},
+                            {?MESSAGE_KEY, Message}
+                            | List ]
+                        )
               });
           false ->
             {error, required_fields_not_set}
@@ -189,19 +194,22 @@ send_trace (ProgId, Owner, TraceId, Message, Context) ->
       send_event (
         #lwes_event {
           name = ?TRACE_EVENT,
-          attrs = [ { ?PROG_ID_KEY, ProgId },
-                    { ?OWNER_ID_KEY, Owner },
-                    { ?TRACE_ID_KEY, TraceId },
-                    { ?SRC_HOST_KEY, net_adm:localhost() },
-                    { ?MESSAGE_KEY, Message }
-                    | List ]
+          attrs = dict:from_list (
+                    [ { ?PROG_ID_KEY, ProgId },
+                      { ?OWNER_ID_KEY, Owner },
+                      { ?TRACE_ID_KEY, TraceId },
+                      { ?SRC_HOST_KEY, net_adm:localhost() },
+                      { ?MESSAGE_KEY, Message }
+                      | List ]
+                  )
         });
     _ ->
       {error, context_format_not_recognized}
   end.
 
 send_stats (ProgId, Context, Stats) ->
-  ContextNum = length (Context),
+  % add 1 for host
+  ContextNum = length (Context) + 1,
   StatsNum   = length (Stats),
   Event =
     #lwes_event {
@@ -211,34 +219,24 @@ send_stats (ProgId, Context, Stats) ->
                   { ?LWES_U_INT_16, ?STATS_NUM, StatsNum },
                   lists:zipwith (
                     fun (I, {K, V}) ->
-                          [ {?LWES_STRING,
-                              ?STATS_K++integer_to_list(I), to_string (K)},
-                            {?LWES_INT_64,
-                              ?STATS_V++integer_to_list(I), V}
+                          [ {?LWES_STRING, stat_key (I), stringify (K)},
+                            {?LWES_INT_64, stat_val (I), V}
                           ];
                         (I, {T, K, V}) ->
-                          [ {?LWES_STRING,
-                              ?STATS_K++integer_to_list(I), to_string (K)},
-                            {?LWES_INT_64,
-                              ?STATS_V++integer_to_list(I), V},
-                            {?LWES_STRING,
-                              ?STATS_T++integer_to_list(I), to_string (T)}
+                          [ {?LWES_STRING, stat_key (I), stringify (K)},
+                            {?LWES_INT_64, stat_val (I), V},
+                            {?LWES_STRING, stat_type (I), stringify (T)}
                           ]
-                    end, lists:seq (0, StatsNum - 1), Stats),
-                  % add 1 for host
-                  { ?LWES_U_INT_16, ?CTXT_NUM, ContextNum + 1 },
+                    end, lists:seq (1, StatsNum), Stats),
+                  { ?LWES_U_INT_16, ?CTXT_NUM, ContextNum },
                   lists:zipwith (
                     fun (I, {K, V}) ->
-                        [ {?LWES_STRING,
-                            ?CTXT_K++integer_to_list(I), to_string (K)},
-                          {?LWES_STRING,
-                            ?CTXT_V++integer_to_list(I), to_string (V)}
+                        [ {?LWES_STRING, ctxt_key (I), stringify (K)},
+                          {?LWES_STRING, ctxt_val (I), stringify (V)}
                         ]
-                    end, lists:seq (0, ContextNum - 1), Context),
-                  {?LWES_STRING, ?CTXT_K++integer_to_list (ContextNum),
-                    ?STATS_HOST },
-                  {?LWES_STRING, ?CTXT_V++integer_to_list (ContextNum),
-                    net_adm:localhost() }
+                    end, lists:seq (1, ContextNum-1), Context),
+                  {?LWES_STRING, ctxt_key (ContextNum), ?STATS_HOST },
+                  {?LWES_STRING, ctxt_val (ContextNum), net_adm:localhost() }
                 ])
     },
   send_event (Event).
@@ -275,10 +273,19 @@ restart () ->
 current_config () ->
   gen_server:call (?MODULE, current).
 
-%%====================================================================
-%% gen_server callbacks
-%%====================================================================
+%-=====================================================================-
+%-                        gen_server callbacks                         -
+%-=====================================================================-
 init([]) ->
+  Interval =
+    case application:get_env (mondemand, send_interval) of
+      {ok, I} when is_integer (I) -> I;
+      _ -> ?DEFAULT_SEND_INTERVAL
+    end,
+
+  % reload interval is seconds, but gen_server timeouts are millis so convert
+  Delay = Interval * 1000,
+
   case get_lwes_config () of
     {error, Error} ->
       {stop, {error, Error}};
@@ -289,15 +296,26 @@ init([]) ->
                                     public,
                                     named_table,
                                     {write_concurrency, true}]),
+
+          % a Delay of 0 actually turns off emission
           {ok, TRef} =
-            timer:apply_interval (60 * 1000, ?MODULE, log_to_mondemand, []),
+            case Delay =/= 0 of
+              true ->
+                timer:apply_interval (Delay, ?MODULE, log_to_mondemand, []);
+              false ->
+                {ok, undefined}
+            end,
+
           { ok,
             #state{
               config = Config,
               table = TabId,
+              delay = Delay,
+              interval = Interval,
               timer = TRef,
               channel = Channel
-            }
+            },
+            Delay
           };
         {error, Error} ->
           { stop, {error, lwes, Error}}
@@ -350,14 +368,16 @@ code_change (_OldVsn, State, _Extra) ->
 %% Internal functions
 %%====================================================================
 send_event (Event) ->
-  gen_server:cast (?MODULE, {send, Event}).
+  gen_server:cast (?MODULE, {send, lwes_event:to_binary (Event)}).
 
-to_string (In) when is_list (In) ->
-  In;
-to_string (In) when is_atom (In) ->
-  atom_to_list (In);
-to_string (In) when is_integer (In) ->
-  integer_to_list (In).
+stringify (I) when is_integer (I) ->
+  integer_to_list (I);
+stringify (F) when is_float (F) ->
+  float_to_list (F);
+stringify (A) when is_atom (A) ->
+  atom_to_list (A);
+stringify (L) ->
+  L.
 
 key_in_dict (Key, Dict) when is_list (Key) ->
   dict:is_key (Key, Dict)
@@ -369,9 +389,40 @@ key_in_list (Key, List) when is_list (Key), is_list (List) ->
    orelse proplists:is_defined (list_to_binary(Key), List)
    orelse proplists:is_defined (list_to_atom(Key), List).
 
+% generate lookup tables for lwes keys so save some time in production
+-define (ELEMENT_OF_TUPLE_LIST(N,Prefix),
+         element (N,
+                  ct_expand:term (
+                    begin
+                      list_to_tuple (
+                        [
+                          list_to_binary (
+                            lists:concat ([Prefix, integer_to_list(E-1)])
+                          )
+                          || E <- lists:seq(1,1024)
+                        ]
+                      )
+                    end))).
+
+stat_key (N) ->
+  ?ELEMENT_OF_TUPLE_LIST (N, ?STATS_K).
+
+stat_val (N) ->
+  ?ELEMENT_OF_TUPLE_LIST (N, ?STATS_V).
+
+stat_type (N) ->
+  ?ELEMENT_OF_TUPLE_LIST (N, ?STATS_T).
+
+ctxt_key (N) ->
+  ?ELEMENT_OF_TUPLE_LIST (N, ?CTXT_K).
+
+ctxt_val (N) ->
+  ?ELEMENT_OF_TUPLE_LIST (N, ?CTXT_V).
+
 %%--------------------------------------------------------------------
 %%% Test functions
 %%--------------------------------------------------------------------
--ifdef(EUNIT).
+-ifdef (TEST).
+-include_lib ("eunit/include/eunit.hrl").
 
 -endif.

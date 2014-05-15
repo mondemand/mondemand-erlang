@@ -1,3 +1,12 @@
+Version 5.0.0 (molinaro)
+  * serialization of events now happens in calling process instead of while
+  sending
+  * make send_interval an application variable so you can change it from 60
+  seconds if you want
+  * mondemand:stats/0 now adds context when it's available
+  * trace messages now always use dicts internally to better match other
+  languages implementations
+
 Version 4.1.1 (molinaro)
   * updated dependency on version of lwes
 
