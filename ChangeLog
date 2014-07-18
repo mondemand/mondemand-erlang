@@ -1,3 +1,9 @@
+Version 5.1.0 (molinaro)
+  * added interface for gauges
+  * cap counters to max signed int64 as that's what lwes is doing
+  * allow for multiple configs in config file to emit to multiple servers
+  * added an mondemand_stats module which centralizes operations around stats
+
 Version 5.0.0 (molinaro)
   * serialization of events now happens in calling process instead of while
   sending

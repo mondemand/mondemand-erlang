@@ -1,32 +1,62 @@
+%% @author Anthony Molinaro <anthonym@alumni.caltech.edu>
+%%
+%% @doc Mondemand Public Interface
+%%
+%% This module is the public interface for the mondemand client application
+%% for erlang.  In addition it manages the ets table which backs the mondemand
+%% stats collection system.
+%%
+%% Mondemand has the concept of two types of metrics
+%%
+%% * Counters - values which typically increase until rolling back to 0
+%% * Gauges - instantaneous values such as temperature (or more regular
+%% a reseting counter or non-mondemand held counter).
+%%
+%% Clients will typically add calls like
+%%
+%% mondemand:increment (ProgramName, CounterName, AmountToIncrementBy).
+%%
+%% for manipulating counters, and
+%%
+%% mondemand:set (ProgramName, GaugeName, AmountToSetGaugeTo).
+%%
+%% In addition both calls above accept an optional 4th parameter of a list
+%% of Key/Value pairs representing the context of the call.
+%%
+%% Mondemand will add the hostname to all metrics sent to the central
+%% mondemand-server.
+
 -module (mondemand).
 
 -include_lib ("lwes/include/lwes.hrl").
-
--compile({parse_transform, ct_expand}).
+-include ("mondemand_internal.hrl").
 
 -behaviour (gen_server).
 
 %% API
 -export ( [start_link/0,
+
+           % stats functions
            increment/2,
            increment/3,
            increment/4,
+           set/3,
+           set/4,
+           send_stats/3,
+           reset_stats/0,
+           stats/0,
+
+           % tracing functions
+           send_trace/3,
+           send_trace/5,
+
+           % other functions
            all/0,
            get_lwes_config/0,
            log_to_mondemand/0,
-           send_trace/3,
-           send_trace/5,
-           send_stats/3,
-           reset_stats/0,
            reload_config/0,
-           restart/0,
            current_config/0,
-           stats/0,
-           stat_key/1,
-           stat_val/1,
-           stat_type/1,
-           ctxt_key/1,
-           ctxt_val/1
+           restart/0
          ]).
 
 %% gen_server callbacks
@@ -42,27 +72,7 @@
 
 -define (TABLE, mondemand_stats).
 -define (DEFAULT_SEND_INTERVAL, 60).
-
--define (STATS_EVENT, "MonDemand::StatsMsg").
--define (TRACE_EVENT, "MonDemand::TraceMsg").
-
-% tokens in Stats message
--define (PROG_ID,    "prog_id").
--define (STATS_NUM,  "num").
--define (STATS_K,    "k").
--define (STATS_V,    "v").
--define (STATS_T,    "t").
--define (CTXT_NUM,   "ctxt_num").
--define (CTXT_K,     "ctxt_k").
--define (CTXT_V,     "ctxt_v").
--define (STATS_HOST, "host").
-
-% tokens in trace message
--define (TRACE_ID_KEY, "mondemand.trace_id").
--define (OWNER_ID_KEY, "mondemand.owner").
--define (PROG_ID_KEY,  "mondemand.prog_id").
--define (SRC_HOST_KEY, "mondemand.src_host").
--define (MESSAGE_KEY,  "mondemand.message").
+-define (MAX_METRIC_VALUE, 9223372036854775807).
 
 %-=====================================================================-
 %-                                  API                                -
@@ -76,13 +86,37 @@ increment (ProgId, Key) ->
 increment (ProgId, Key, Amount) when is_integer (Amount) ->
   increment (ProgId, Key, Amount, []).
 
-increment (ProgId, Key, Amount, Context) when is_integer (Amount) ->
-  SortedContext = lists:sort ([{?PROG_ID, ProgId} | Context]),
+increment (ProgId, Key, Amount, Context)
+  when is_integer (Amount), is_list (Context) ->
+  SortedContext = lists:keysort (1, Context),
 
-  try ets:update_counter (?TABLE, {SortedContext, Key}, {2, Amount}) of
+  % LWES is sending int64 values, so wrap at the max int64 integer back to
+  % zero
+  try ets:update_counter (?TABLE,
+                          {ProgId, SortedContext, counter, Key},
+                          {2, Amount, ?MAX_METRIC_VALUE, 0}) of
     _ -> ok
   catch
-    error:badarg -> ets:insert (?TABLE, { {SortedContext, Key}, Amount })
+    error:badarg ->
+      ets:insert (?TABLE, { {ProgId, SortedContext, counter, Key}, Amount })
+  end.
+
+set (ProgId, Key, Amount) when is_integer (Amount) ->
+  set (ProgId, Key, Amount, []).
+
+set (ProgId, Key, Amount, Context)
+  when is_integer (Amount), is_list (Context) ->
+  SortedContext = lists:keysort (1,Context),
+
+  % if we would overflow a gauge, instead of going negative just leave it
+  % at the max value and return false from set
+  case Amount =< ?MAX_METRIC_VALUE of
+    true ->
+      ets:insert (?TABLE, { {ProgId, SortedContext, gauge, Key}, Amount});
+    false ->
+      ets:insert (?TABLE, { {ProgId, SortedContext, gauge, Key},
+                          ?MAX_METRIC_VALUE}),
+      false
   end.
 
 % return current config
@@ -92,24 +126,35 @@ get_lwes_config () ->
   %   2. from the file referenced by the config_file application variable
   % they are checked in that order
   case application:get_env (mondemand, lwes_channel) of
-    {ok, {H,P}} ->
-      {H,P};
+    {ok, {H,P}} when is_list (H), is_integer (P) ->
+      {1, [{H,P}]}; % allow old config style to continue to work
+    {ok, Config} -> Config;      % new style is to just pass anything through
     undefined ->
       case application:get_env (mondemand, config_file) of
         {ok, File} ->
           case file:read_file (File) of
             {ok, Bin} ->
-              {match, [Host]} = re:run (Bin, "MONDEMAND_ADDR=\"([^\"]+)\"",
-                                        [{capture, all_but_first, list}]),
+              {match, [HostOrHosts]} =
+                re:run (Bin, "MONDEMAND_ADDR=\"([^\"]+)\"",
+                             [{capture, all_but_first, list}]),
               {match, [Port]} = re:run (Bin, "MONDEMAND_PORT=\"([^\"]+)\"",
                                         [{capture, all_but_first, list}]),
               IntPort = list_to_integer (Port),
-              {Host, IntPort};
+              io:format ("HostOrHosts ~p~n",[HostOrHosts]),
+              Split = re:split(HostOrHosts,",",[{return, list}]),
+              io:format ("Split ~p~n",[Split]),
+              case Split of
+                [] -> {error, config_file_issue};
+                [Host] -> {1, [ {Host, IntPort} ]};
+                L when is_list (L) ->
+                  % allow emitting the same thing to multiple addresses
+                  { length (L), [ {H, IntPort} || H <- L ] }
+              end;
             E ->
               E
           end;
         undefined ->
-          {error, no_lwes_channel_configed}
+          {error, no_lwes_channel_configured}
       end
   end.
 
@@ -124,17 +169,22 @@ stats () ->
   [
     begin
       io:format ("~-21s ~-35s ~-20b~n",
-                 [stringify (proplists:get_value ("prog_id",Context,"unknown")),
-                  stringify (Key),
-                  Value]),
-      lists:foreach (fun ({"prog_id",_}) ->
-                           ok;
-                         ({CKey, CValue}) ->
-                           io:format (" {~s, ~s}~n", [stringify (CKey),
-                                                      stringify (CValue)])
+                 [
+                   case ProgId of
+                     undefined -> "unknown";
+                     P ->  mondemand_util:stringify (P)
+                   end,
+                   mondemand_util:stringify (Key),
+                   Value
+                 ]),
+      lists:foreach (fun ({CKey, CValue}) ->
+                           io:format (" {~s, ~s}~n", [
+                               mondemand_util:stringify (CKey),
+                               mondemand_util:stringify (CValue)
+                             ])
                      end, Context)
     end
-    || {{Context,Key},Value}
+    || {{ProgId, Context, _Type, Key},Value}
     <- lists:sort (ets:tab2list (?TABLE))
   ],
   ok.
@@ -142,8 +192,8 @@ stats () ->
 send_trace (ProgId, Message, Context) ->
   case Context of
     Dict when is_tuple (Context) andalso element (1, Context) =:= dict ->
-      case key_in_dict (?TRACE_ID_KEY, Dict)
-        andalso key_in_dict (?OWNER_ID_KEY, Dict) of
+      case mondemand_util:key_in_dict (?TRACE_ID_KEY, Dict)
+        andalso mondemand_util:key_in_dict (?OWNER_ID_KEY, Dict) of
         true ->
           send_event (
             #lwes_event {
@@ -157,8 +207,8 @@ send_trace (ProgId, Message, Context) ->
           {error, required_fields_not_set}
       end;
     List when is_list (Context) ->
-      case key_in_list (?TRACE_ID_KEY, List)
-        andalso key_in_list (?OWNER_ID_KEY, List) of
+      case mondemand_util:key_in_list (?TRACE_ID_KEY, List)
+        andalso mondemand_util:key_in_list (?OWNER_ID_KEY, List) of
           true ->
             send_event (
               #lwes_event {
@@ -208,61 +258,23 @@ send_trace (ProgId, Owner, TraceId, Message, Context) ->
   end.
 
 send_stats (ProgId, Context, Stats) ->
-  % add 1 for host
-  ContextNum = length (Context) + 1,
-  StatsNum   = length (Stats),
   Event =
-    #lwes_event {
-      name  = ?STATS_EVENT,
-      attrs = lists:flatten (
-                [ { ?LWES_STRING, ?PROG_ID, ProgId },
-                  { ?LWES_U_INT_16, ?STATS_NUM, StatsNum },
-                  lists:zipwith (
-                    fun (I, {K, V}) ->
-                          [ {?LWES_STRING, stat_key (I), stringify (K)},
-                            {?LWES_INT_64, stat_val (I), V}
-                          ];
-                        (I, {T, K, V}) ->
-                          [ {?LWES_STRING, stat_key (I), stringify (K)},
-                            {?LWES_INT_64, stat_val (I), V},
-                            {?LWES_STRING, stat_type (I), stringify (T)}
-                          ]
-                    end, lists:seq (1, StatsNum), Stats),
-                  { ?LWES_U_INT_16, ?CTXT_NUM, ContextNum },
-                  lists:zipwith (
-                    fun (I, {K, V}) ->
-                        [ {?LWES_STRING, ctxt_key (I), stringify (K)},
-                          {?LWES_STRING, ctxt_val (I), stringify (V)}
-                        ]
-                    end, lists:seq (1, ContextNum-1), Context),
-                  {?LWES_STRING, ctxt_key (ContextNum), ?STATS_HOST },
-                  {?LWES_STRING, ctxt_val (ContextNum), net_adm:localhost() }
-                ])
-    },
+    mondemand_stats:to_lwes (
+      mondemand_stats:new (ProgId, Context, Stats)
+    ),
   send_event (Event).
 
 log_to_mondemand () ->
-  All = all(),
-  % struct in ets is
-  %  { { Context, Key }, Value }
-  % but I want to send this in the fewest number of mondemand-tool calls
-  % so I need to
-  [ begin
-      % extract prog id from the context
-      {_, ProgId} = proplists:lookup (?PROG_ID, C),
-      send_stats (ProgId,
-                  % delete the prog_id from the context
-                  proplists:delete (?PROG_ID, C),
-                  % iterate through all the keys pulling out each for this
-                  % context
-                  [ { counter, K, V } || { { C2, K }, V } <- All, C2 =:= C ])
-    end
-    || C <- lists:usort ([CK || { { CK, _ }, _ } <- All])
-  ],
-  ok.
+  send_event (
+    mondemand_stats:to_lwes (mondemand_stats:from_ets (?TABLE))
+  ).
 
 reset_stats () ->
-  ets:delete_all_objects (?TABLE).
+  ets:foldl (fun ({K, _}, Prev) ->
+               ets:update_element (?TABLE, K, [{2,0}]) andalso Prev
+             end,
+             true,
+             ?TABLE).
 
 reload_config () ->
   gen_server:call (?MODULE, reload).
@@ -290,7 +302,7 @@ init([]) ->
     {error, Error} ->
       {stop, {error, Error}};
     Config ->
-      case lwes:open (emitter, Config) of
+      case lwes:open (emitters, Config) of
         {ok, Channel} ->
           TabId = ets:new (?TABLE, [set,
                                     public,
@@ -367,57 +379,10 @@ code_change (_OldVsn, State, _Extra) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
-send_event (Event) ->
+send_event (Events) when is_list (Events) ->
+  [ send_event (Event) || Event <- Events ];
+send_event (Event = #lwes_event {}) ->
   gen_server:cast (?MODULE, {send, lwes_event:to_binary (Event)}).
-
-stringify (I) when is_integer (I) ->
-  integer_to_list (I);
-stringify (F) when is_float (F) ->
-  float_to_list (F);
-stringify (A) when is_atom (A) ->
-  atom_to_list (A);
-stringify (L) ->
-  L.
-
-key_in_dict (Key, Dict) when is_list (Key) ->
-  dict:is_key (Key, Dict)
-    orelse dict:is_key (list_to_binary(Key), Dict)
-    orelse dict:is_key (list_to_atom(Key), Dict).
-
-key_in_list (Key, List) when is_list (Key), is_list (List) ->
-  proplists:is_defined (Key, List)
-   orelse proplists:is_defined (list_to_binary(Key), List)
-   orelse proplists:is_defined (list_to_atom(Key), List).
-
-% generate lookup tables for lwes keys so save some time in production
--define (ELEMENT_OF_TUPLE_LIST(N,Prefix),
-         element (N,
-                  ct_expand:term (
-                    begin
-                      list_to_tuple (
-                        [
-                          list_to_binary (
-                            lists:concat ([Prefix, integer_to_list(E-1)])
-                          )
-                          || E <- lists:seq(1,1024)
-                        ]
-                      )
-                    end))).
-
-stat_key (N) ->
-  ?ELEMENT_OF_TUPLE_LIST (N, ?STATS_K).
-
-stat_val (N) ->
-  ?ELEMENT_OF_TUPLE_LIST (N, ?STATS_V).
-
-stat_type (N) ->
-  ?ELEMENT_OF_TUPLE_LIST (N, ?STATS_T).
-
-ctxt_key (N) ->
-  ?ELEMENT_OF_TUPLE_LIST (N, ?CTXT_K).
-
-ctxt_val (N) ->
-  ?ELEMENT_OF_TUPLE_LIST (N, ?CTXT_V).
 
 %%--------------------------------------------------------------------
 %%% Test functions
