@@ -9,7 +9,7 @@
 %% Mondemand has the concept of two types of metrics
 %%
 %% * Counters - values which typically increase until rolling back to 0
-%% * Gauges - instantaneous values such as temperature (or more regular
+%% * Gauges - instantaneous values such as temperature (or more regularly
 %% a reseting counter or non-mondemand held counter).
 %%
 %% Clients will typically add calls like
@@ -42,6 +42,11 @@
            increment/4,
            set/3,
            set/4,
+
+           add_sample/3,
+           add_sample/4,
+
+
            send_stats/3,
            reset_stats/0,
            stats/0,
@@ -70,8 +75,6 @@
 
 -record (state, {config, interval, delay, table, timer, channel}).
 
--define (TABLE, mondemand_stats).
--define (DEFAULT_SEND_INTERVAL, 60).
 -define (MAX_METRIC_VALUE, 9223372036854775807).
 
 %-=====================================================================-
@@ -88,36 +91,20 @@ increment (ProgId, Key, Amount) when is_integer (Amount) ->
 
 increment (ProgId, Key, Amount, Context)
   when is_integer (Amount), is_list (Context) ->
-  SortedContext = lists:keysort (1, Context),
-
-  % LWES is sending int64 values, so wrap at the max int64 integer back to
-  % zero
-  try ets:update_counter (?TABLE,
-                          {ProgId, SortedContext, counter, Key},
-                          {2, Amount, ?MAX_METRIC_VALUE, 0}) of
-    _ -> ok
-  catch
-    error:badarg ->
-      ets:insert (?TABLE, { {ProgId, SortedContext, counter, Key}, Amount })
-  end.
+  mondemand_statdb:increment (ProgId, Key, Amount, Context).
 
 set (ProgId, Key, Amount) when is_integer (Amount) ->
   set (ProgId, Key, Amount, []).
 
 set (ProgId, Key, Amount, Context)
   when is_integer (Amount), is_list (Context) ->
-  SortedContext = lists:keysort (1,Context),
+  mondemand_statdb:set (ProgId, Key, Amount, Context).
 
-  % if we would overflow a gauge, instead of going negative just leave it
-  % at the max value and return false from set
-  case Amount =< ?MAX_METRIC_VALUE of
-    true ->
-      ets:insert (?TABLE, { {ProgId, SortedContext, gauge, Key}, Amount});
-    false ->
-      ets:insert (?TABLE, { {ProgId, SortedContext, gauge, Key},
-                          ?MAX_METRIC_VALUE}),
-      false
-  end.
+add_sample (ProgId, Key, Value) ->
+  add_sample (ProgId, Key, Value, []).
+add_sample (ProgId, Key, Value, Context)
+  when is_integer (Value), is_list (Context) ->
+  mondemand_statdb:add_sample (ProgId, Key, Value, Context).
 
 % return current config
 get_lwes_config () ->
@@ -140,9 +127,7 @@ get_lwes_config () ->
               {match, [Port]} = re:run (Bin, "MONDEMAND_PORT=\"([^\"]+)\"",
                                         [{capture, all_but_first, list}]),
               IntPort = list_to_integer (Port),
-              io:format ("HostOrHosts ~p~n",[HostOrHosts]),
               Split = re:split(HostOrHosts,",",[{return, list}]),
-              io:format ("Split ~p~n",[Split]),
               case Split of
                 [] -> {error, config_file_issue};
                 [Host] -> {1, [ {Host, IntPort} ]};
@@ -159,35 +144,10 @@ get_lwes_config () ->
   end.
 
 all () ->
-  ets:tab2list (?TABLE).
+  mondemand_statdb:all().
 
 stats () ->
-  io:format ("~-21s ~-35s ~-20s~n",["prog_id", "key", "value"]),
-  io:format ("~-21s ~-35s ~-20s~n",["---------------------",
-                                    "-----------------------------------",
-                                    "--------------------"]),
-  [
-    begin
-      io:format ("~-21s ~-35s ~-20b~n",
-                 [
-                   case ProgId of
-                     undefined -> "unknown";
-                     P ->  mondemand_util:stringify (P)
-                   end,
-                   mondemand_util:stringify (Key),
-                   Value
-                 ]),
-      lists:foreach (fun ({CKey, CValue}) ->
-                           io:format (" {~s, ~s}~n", [
-                               mondemand_util:stringify (CKey),
-                               mondemand_util:stringify (CValue)
-                             ])
-                     end, Context)
-    end
-    || {{ProgId, Context, _Type, Key},Value}
-    <- lists:sort (ets:tab2list (?TABLE))
-  ],
-  ok.
+  mondemand_statdb:metrics ().
 
 send_trace (ProgId, Message, Context) ->
   case Context of
@@ -265,16 +225,13 @@ send_stats (ProgId, Context, Stats) ->
   send_event (Event).
 
 log_to_mondemand () ->
-  send_event (
-    mondemand_stats:to_lwes (mondemand_stats:from_ets (?TABLE))
-  ).
+  mondemand_statdb:to_stats (
+    fun (Stats) ->
+      send_event (mondemand_stats:to_lwes (Stats))
+    end).
 
 reset_stats () ->
-  ets:foldl (fun ({K, _}, Prev) ->
-               ets:update_element (?TABLE, K, [{2,0}]) andalso Prev
-             end,
-             true,
-             ?TABLE).
+  mondemand_statdb:reset_stats().
 
 reload_config () ->
   gen_server:call (?MODULE, reload).
@@ -304,11 +261,6 @@ init([]) ->
     Config ->
       case lwes:open (emitters, Config) of
         {ok, Channel} ->
-          TabId = ets:new (?TABLE, [set,
-                                    public,
-                                    named_table,
-                                    {write_concurrency, true}]),
-
           % a Delay of 0 actually turns off emission
           {ok, TRef} =
             case Delay =/= 0 of
@@ -317,11 +269,9 @@ init([]) ->
               false ->
                 {ok, undefined}
             end,
-
           { ok,
             #state{
               config = Config,
-              table = TabId,
               delay = Delay,
               interval = Interval,
               timer = TRef,

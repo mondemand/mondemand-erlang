@@ -1,6 +1,8 @@
 -ifndef(_mondemand_internal_included).
 -define(_mondemand_internal_included, yup).
 
+-define (DEFAULT_SEND_INTERVAL, 60).
+
 -define (STATS_EVENT, <<"MonDemand::StatsMsg">>).
 -define (TRACE_EVENT, <<"MonDemand::TraceMsg">>).
 
@@ -21,5 +23,29 @@
 -define (PROG_ID_KEY,  "mondemand.prog_id").
 -define (SRC_HOST_KEY, "mondemand.src_host").
 -define (MESSAGE_KEY,  "mondemand.message").
+
+-record (stats_msg, { timestamp,
+                      prog_id,
+                      host,
+                      num_context = 0,
+                      context = [],
+                      num_metrics = 0,
+                      metrics = []
+                    }).
+-record (metric, {type,
+                  key,
+                  value
+                 }).
+-record (statset, {count,
+                   sum,
+                   min,
+                   max,
+                   avg,
+                   median,
+                   pctl_75,
+                   pctl_90,
+                   pctl_95,
+                   pctl_98,
+                   pctl_99}).
 
 -endif.
