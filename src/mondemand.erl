@@ -35,30 +35,30 @@
 
 %% API
 -export ( [start_link/0,
+           get_state/0,
 
            % stats functions
-           increment/2,
-           increment/3,
-           increment/4,
-           set/3,
-           set/4,
-
-           add_sample/3,
-           add_sample/4,
-
-
-           send_stats/3,
-           reset_stats/0,
-           stats/0,
+           % counters
+           increment/2,   % (ProgId, Key)
+           increment/3,   % (ProgId, Key, Amount | Context )
+           increment/4,   % (ProgId, Key, Amount | Context, Context | Amount )
+           % gauges
+           set/3,         % (ProgId, Key, Value)
+           set/4,         % (ProgId, Key, Context, Value)
+           % statsets
+           add_sample/3,  % (ProgId, Key, Value)
+           add_sample/4,  % (ProgId, Key, Context, Value)
 
            % tracing functions
            send_trace/3,
            send_trace/5,
 
            % other functions
+           send_stats/3,
+           reset_stats/0,
+           stats/0,
            all/0,
            get_lwes_config/0,
-           log_to_mondemand/0,
            reload_config/0,
            current_config/0,
            restart/0
@@ -73,9 +73,7 @@
             code_change/3
           ]).
 
--record (state, {config, interval, delay, table, timer, channel}).
-
--define (MAX_METRIC_VALUE, 9223372036854775807).
+-record (state, {config, interval, jitter, timer, channel}).
 
 %-=====================================================================-
 %-                                  API                                -
@@ -83,28 +81,37 @@
 start_link() ->
   gen_server:start_link ({local, ?MODULE}, ?MODULE, [], []).
 
+get_state() ->
+  gen_server:call (?MODULE, get_state).
+
 increment (ProgId, Key) ->
-  increment (ProgId, Key, 1, []).
+  increment (ProgId, Key, [], 1).
 
+increment (ProgId, Key, Context) when is_list (Context) ->
+  increment (ProgId, Key, Context, 1);
 increment (ProgId, Key, Amount) when is_integer (Amount) ->
-  increment (ProgId, Key, Amount, []).
+  increment (ProgId, Key, [], Amount).
 
+% this first clause is just for legacy systems
 increment (ProgId, Key, Amount, Context)
   when is_integer (Amount), is_list (Context) ->
-  mondemand_statdb:increment (ProgId, Key, Amount, Context).
+  increment (ProgId, Key, Context, Amount);
+increment (ProgId, Key, Context, Amount)
+  when is_integer (Amount), is_list (Context) ->
+  mondemand_statdb:increment (ProgId, Key, Context, Amount).
 
 set (ProgId, Key, Amount) when is_integer (Amount) ->
-  set (ProgId, Key, Amount, []).
+  set (ProgId, Key, [], Amount).
 
-set (ProgId, Key, Amount, Context)
+set (ProgId, Key, Context, Amount)
   when is_integer (Amount), is_list (Context) ->
-  mondemand_statdb:set (ProgId, Key, Amount, Context).
+  mondemand_statdb:set (ProgId, Key, Context, Amount).
 
 add_sample (ProgId, Key, Value) ->
-  add_sample (ProgId, Key, Value, []).
-add_sample (ProgId, Key, Value, Context)
+  add_sample (ProgId, Key, [], Value).
+add_sample (ProgId, Key, Context, Value)
   when is_integer (Value), is_list (Context) ->
-  mondemand_statdb:add_sample (ProgId, Key, Value, Context).
+  mondemand_statdb:add_sample (ProgId, Key, Context, Value).
 
 % return current config
 get_lwes_config () ->
@@ -119,25 +126,7 @@ get_lwes_config () ->
     undefined ->
       case application:get_env (mondemand, config_file) of
         {ok, File} ->
-          case file:read_file (File) of
-            {ok, Bin} ->
-              {match, [HostOrHosts]} =
-                re:run (Bin, "MONDEMAND_ADDR=\"([^\"]+)\"",
-                             [{capture, all_but_first, list}]),
-              {match, [Port]} = re:run (Bin, "MONDEMAND_PORT=\"([^\"]+)\"",
-                                        [{capture, all_but_first, list}]),
-              IntPort = list_to_integer (Port),
-              Split = re:split(HostOrHosts,",",[{return, list}]),
-              case Split of
-                [] -> {error, config_file_issue};
-                [Host] -> {1, [ {Host, IntPort} ]};
-                L when is_list (L) ->
-                  % allow emitting the same thing to multiple addresses
-                  { length (L), [ {H, IntPort} || H <- L ] }
-              end;
-            E ->
-              E
-          end;
+          parse_config (File);
         undefined ->
           {error, no_lwes_channel_configured}
       end
@@ -147,7 +136,7 @@ all () ->
   mondemand_statdb:all().
 
 stats () ->
-  mondemand_statdb:metrics ().
+  mondemand_statdb:all().
 
 send_trace (ProgId, Message, Context) ->
   case Context of
@@ -224,11 +213,8 @@ send_stats (ProgId, Context, Stats) ->
     ),
   send_event (Event).
 
-log_to_mondemand () ->
-  mondemand_statdb:to_stats (
-    fun (Stats) ->
-      send_event (mondemand_stats:to_lwes (Stats))
-    end).
+flush () ->
+  mondemand_statdb:flush (1, fun flush_one/1).
 
 reset_stats () ->
   mondemand_statdb:reset_stats().
@@ -246,14 +232,16 @@ current_config () ->
 %-                        gen_server callbacks                         -
 %-=====================================================================-
 init([]) ->
-  Interval =
+
+  IntervalSecs =
     case application:get_env (mondemand, send_interval) of
       {ok, I} when is_integer (I) -> I;
       _ -> ?DEFAULT_SEND_INTERVAL
     end,
 
-  % reload interval is seconds, but gen_server timeouts are millis so convert
-  Delay = Interval * 1000,
+  % use milliseconds for interval and for jitter
+  Interval = IntervalSecs * 1000,
+  Jitter = crypto:rand_uniform (1, IntervalSecs) * 1000,
 
   case get_lwes_config () of
     {error, Error} ->
@@ -261,35 +249,41 @@ init([]) ->
     Config ->
       case lwes:open (emitters, Config) of
         {ok, Channel} ->
-          % a Delay of 0 actually turns off emission
-          {ok, TRef} =
-            case Delay =/= 0 of
-              true ->
-                timer:apply_interval (Delay, ?MODULE, log_to_mondemand, []);
-              false ->
-                {ok, undefined}
-            end,
+
+          case Interval =/= 0 of
+            true ->
+              % shoot for starting flushes some time after the next
+              % round minute
+              timer:send_after (
+                mondemand_util:millis_to_next_round_minute() + Jitter,
+                ?MODULE,
+                flush);
+            false ->
+              ok
+          end,
+
           { ok,
             #state{
               config = Config,
-              delay = Delay,
+              jitter = Jitter ,
               interval = Interval,
-              timer = TRef,
               channel = Channel
-            },
-            Delay
+            }
           };
         {error, Error} ->
-          { stop, {error, lwes, Error}}
+          { stop, {error, lwes, Error} }
       end
   end.
 
+% just return the state
+handle_call (get_state, _From, State) ->
+  {reply, State, State};
 % restart with currently assigned config
 handle_call (restart, _From,
-             State = #state { config = Config, channel = Channel }) ->
+             State = #state { config = Config, channel = OldChannel }) ->
   case lwes:open (emitter, Config) of
     {ok, NewChannel} ->
-      lwes:close (Channel),
+      lwes:close (OldChannel),
       {reply, ok, State#state {channel = NewChannel}};
     {error, E} ->
       {reply, {error, E, Config}, State}
@@ -317,6 +311,13 @@ handle_cast ({send, Event}, State = #state { channel = Channel }) ->
 handle_cast (_Request, State) ->
   {noreply, State}.
 
+handle_info (flush, State = #state {timer = undefined, interval = Interval}) ->
+  {ok, TRef} = timer:send_interval (Interval, ?MODULE, flush),
+  flush (),
+  {noreply, State#state {timer = TRef}};
+handle_info (flush, State = #state {}) ->
+  flush (),
+  {noreply, State#state {}};
 handle_info (_Info, State) ->
   {noreply, State}.
 
@@ -334,10 +335,89 @@ send_event (Events) when is_list (Events) ->
 send_event (Event = #lwes_event {}) ->
   gen_server:cast (?MODULE, {send, lwes_event:to_binary (Event)}).
 
+flush_one (Stats) ->
+  send_event (mondemand_stats:to_lwes (Stats)).
+
+parse_config (File) ->
+  case file:read_file (File) of
+    {ok, Bin} ->
+      HostOrHosts =
+        case re:run (Bin, "MONDEMAND_ADDR=\"([^\"]+)\"",
+                     [{capture, all_but_first, list}]) of
+          nomatch -> [];
+          {match, [H]} -> H
+        end,
+      Port =
+        case re:run (Bin, "MONDEMAND_PORT=\"([^\"]+)\"",
+                     [{capture, all_but_first, list}]) of
+          nomatch -> undefined;
+          {match, [P]} -> list_to_integer(P)
+        end,
+      TTL =
+        case re:run (Bin, "MONDEMAND_TTL=\"([^\"]+)\"",
+                          [{capture, all_but_first, list}]) of
+          nomatch -> undefined;
+          {match, [T]} -> list_to_integer(T)
+        end,
+
+      case Port of
+        undefined -> {error, no_port_in_config_file};
+        _ ->
+          Split = re:split(HostOrHosts,",",[{return, list}]),
+          case Split of
+            [] -> {error, config_file_issue};
+            [Host] ->
+              case TTL of
+                undefined -> {1, [ {Host, Port} ]};
+                _ -> {1, [ {Host, Port, TTL} ] }
+              end;
+            L when is_list (L) ->
+              % allow emitting the same thing to multiple addresses
+              case TTL of
+                undefined -> { length (L), [ {H, Port} || H <- L ] };
+                _ -> { length (L), [ {H, Port, TTL} || H <- L ] }
+              end
+          end
+      end;
+    E ->
+      E
+  end.
+
 %%--------------------------------------------------------------------
 %%% Test functions
 %%--------------------------------------------------------------------
--ifdef (TEST).
+%-ifdef (TEST).
 -include_lib ("eunit/include/eunit.hrl").
 
--endif.
+config_file_test_ () ->
+  ConfigFile = "mondemand.config",
+  WriteConfig =
+    fun (Host, Port, TTL) ->
+      % TODO: should I permute the order of the config lines?
+      {ok, File} = file:open (ConfigFile, [write]),
+      ok = io:format (File, "MONDEMAND_ADDR=\"~s\"~n",[Host]),
+      ok = io:format (File, "MONDEMAND_PORT=\"~b\"~n",[Port]),
+      case TTL of
+        undefined -> ok;
+        _ -> ok = io:format (File, "MONDEMAND_TTL=\"~b\"~n",[TTL])
+      end,
+      file:close (File)
+    end,
+  DeleteConfig =
+    fun () ->
+      file:delete (ConfigFile)
+    end,
+  { inorder,
+    [
+      % delete any files from failed tests
+      fun () -> DeleteConfig () end,
+      fun () -> ok = WriteConfig ("localhost", 20602, undefined) end,
+      ?_assertEqual ({1, [{"localhost",20602}]}, parse_config (ConfigFile)),
+      fun () -> ok = DeleteConfig () end,
+      fun () -> ok = WriteConfig ("localhost", 20602, 3) end,
+      ?_assertEqual ({1, [{"localhost",20602, 3}]}, parse_config (ConfigFile)),
+      fun () -> ok = DeleteConfig () end
+    ]
+  }.
+
+%-endif.

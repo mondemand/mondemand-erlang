@@ -33,6 +33,7 @@
           new/5,
           new_statset/0,
           set_statset/3,
+          get_statset/2,
           prog_id/1,
           host/1,
           context/1,
@@ -64,10 +65,10 @@ new (ProgId, Context, Metrics = [{_,_,_}|_], Host) ->
                        <- Metrics ],
   new (ProgId, Context, ValidatedMetrics, Host);
 new (ProgId, Context, Metrics, Host) ->
-  new (ProgId, Context, Metrics, Host, mondemand_util:millis_since_epoch()).
+  new (ProgId, Context, Metrics, Host, undefined).
 
 new (ProgId, Context, Metrics, Host, Timestamp) ->
-  #stats_msg { timestamp = Timestamp,
+  #stats_msg { send_time = Timestamp,
                prog_id = ProgId,
                host = Host,
                num_context = length (Context),
@@ -76,38 +77,37 @@ new (ProgId, Context, Metrics, Host, Timestamp) ->
                metrics = Metrics
              }.
 
-new_statset () ->
-  #statset {}.
+new_statset () -> #statset {}.
 
-set_statset (count, Count, S = #statset{}) ->
-  S#statset {count = Count};
-set_statset (sum, Sum, S = #statset{}) ->
-  S#statset {sum = Sum};
-set_statset (min, Min, S = #statset{}) ->
-  S#statset {min = Min};
-set_statset (max, Max, S = #statset{}) ->
-  S#statset {max = Max};
-set_statset (avg, Avg, S = #statset{}) ->
-  S#statset {avg = Avg};
-set_statset (median, Median, S = #statset{}) ->
-  S#statset {median = Median};
-set_statset (pctl_75, Pctl75, S = #statset{}) ->
-  S#statset {pctl_75 = Pctl75};
-set_statset (pctl_90, Pctl90, S = #statset{}) ->
-  S#statset {pctl_90 = Pctl90};
-set_statset (pctl_95, Pctl95, S = #statset{}) ->
-  S#statset {pctl_95 = Pctl95};
-set_statset (pctl_98, Pctl98, S = #statset{}) ->
-  S#statset {pctl_98 = Pctl98};
-set_statset (pctl_99, Pctl99, S = #statset{}) ->
-  S#statset {pctl_99 = Pctl99}.
+set_statset (count, Count, S = #statset{}) -> S#statset {count = Count};
+set_statset (sum, Sum, S = #statset{}) -> S#statset {sum = Sum};
+set_statset (min, Min, S = #statset{}) -> S#statset {min = Min};
+set_statset (max, Max, S = #statset{}) -> S#statset {max = Max};
+set_statset (avg, Avg, S = #statset{}) -> S#statset {avg = Avg};
+set_statset (median, Median, S = #statset{}) -> S#statset {median = Median};
+set_statset (pctl_75, Pctl75, S = #statset{}) -> S#statset {pctl_75 = Pctl75};
+set_statset (pctl_90, Pctl90, S = #statset{}) -> S#statset {pctl_90 = Pctl90};
+set_statset (pctl_95, Pctl95, S = #statset{}) -> S#statset {pctl_95 = Pctl95};
+set_statset (pctl_98, Pctl98, S = #statset{}) -> S#statset {pctl_98 = Pctl98};
+set_statset (pctl_99, Pctl99, S = #statset{}) -> S#statset {pctl_99 = Pctl99}.
+
+get_statset (count, S = #statset{}) -> S#statset.count;
+get_statset (sum, S = #statset{}) -> S#statset.sum;
+get_statset (min, S = #statset{}) -> S#statset.min;
+get_statset (max, S = #statset{}) -> S#statset.max;
+get_statset (avg, S = #statset{}) -> S#statset.avg;
+get_statset (median, S = #statset{}) -> S#statset.median;
+get_statset (pctl_75, S = #statset{}) -> S#statset.pctl_75;
+get_statset (pctl_90, S = #statset{}) -> S#statset.pctl_90;
+get_statset (pctl_95, S = #statset{}) -> S#statset.pctl_95;
+get_statset (pctl_98, S = #statset{}) -> S#statset.pctl_98;
+get_statset (pctl_99, S = #statset{}) -> S#statset.pctl_99.
 
 % the ESF for mondemand stats messages is as follows
 % MonDemand::StatsMsg
 % {
 %   string prog_id;    # program identifier
-%   uint64 timestamp;  # time for stats in milliseconds since epoch, if unset
-%                      # the receipt time of the event will be used
+%   int64  send_time;  # time for stats in milliseconds since epoch
 %   uint16 num;        # number of stats messages in this event
 %   string k0;         # name of the 0th counter
 %   string t0;         # type of the 0th counter
@@ -128,10 +128,22 @@ set_statset (pctl_99, Pctl99, S = #statset{}) ->
 from_lwes (#lwes_event { attrs = Data}) ->
   % here's the name of the program which originated the metric
   ProgId = dict:fetch (?PROG_ID, Data),
+  SenderIP = dict:fetch (?SENDER_IP, Data),
+  SenderPort = dict:fetch (?SENDER_PORT, Data),
+  ReceiptTime = dict:fetch (?RECEIPT_TIME, Data),
+  SendTime =
+    case dict:find (?SEND_TIME, Data) of
+      error -> undefined;
+      {ok, T} -> T
+    end,
   {Host, NumContexts, Context} = construct_context (Data),
   {NumMetrics, Metrics} = construct_metrics (Data),
 
   #stats_msg {
+    send_time = SendTime,
+    receipt_time = ReceiptTime,
+    sender_ip = SenderIP,
+    sender_port = SenderPort,
     prog_id = ProgId,
     host = Host,
     num_context = NumContexts,
@@ -151,10 +163,18 @@ construct_metrics (Data) ->
       fun (N) ->
           K = dict:fetch (mondemand_util:metric_name_key (N), Data),
           V = dict:fetch (mondemand_util:metric_value_key (N), Data),
-          T = dict:fetch (mondemand_util:metric_type_key (N), Data),
+          T = string_to_type (
+                dict:fetch (
+                  mondemand_util:metric_type_key (N),
+                  Data
+                )
+              ),
           #metric { key = K,
                     type = T,
-                    value = V
+                    value = case T of
+                              statset -> statset_from_string (V);
+                              _ -> V
+                            end
                   }
       end,
       lists:seq (1,Num)
@@ -184,17 +204,24 @@ construct_context (Data) ->
 to_lwes (L) when is_list (L) ->
   lists:map (fun to_lwes/1, L);
 
-to_lwes (#stats_msg { prog_id = ProgId,
+to_lwes (#stats_msg { send_time = SendTimeIn,
+                      prog_id = ProgId,
                       host = Host,
                       num_context = NumContexts,
                       context = Context,
                       num_metrics = NumMetrics,
                       metrics = Metrics
                     }) ->
+  SendTime =
+    case SendTimeIn of
+      undefined -> mondemand_util:millis_since_epoch();
+      T -> T
+    end,
   #lwes_event {
     name  = ?STATS_EVENT,
     attrs = lists:flatten (
               [ { ?LWES_STRING, ?PROG_ID, ProgId },
+                { ?LWES_INT_64, ?SEND_TIME, SendTime },
                 { ?LWES_U_INT_16, ?STATS_NUM, NumMetrics },
                 lists:zipwith (fun metric_to_lwes/2,
                                lists:seq (1, NumMetrics),
@@ -220,13 +247,28 @@ context_to_lwes (ContextIndex, {ContextKey, ContextValue}) ->
   ].
 
 metric_to_lwes (MetricIndex,
-                #metric { key = Name, type = Type, value = Value }) ->
+                #metric { key = Name, type = statset, value = Value }) ->
   [ { ?LWES_STRING,
       mondemand_util:metric_name_key (MetricIndex),
       mondemand_util:stringify (Name) },
     { ?LWES_STRING,
       mondemand_util:metric_type_key (MetricIndex),
-      mondemand_util:stringify (Type)
+      type_to_string (statset)
+    },
+    { ?LWES_STRING,
+      mondemand_util:metric_value_key (MetricIndex),
+      statset_to_string (Value)
+    }
+  ];
+metric_to_lwes (MetricIndex,
+                #metric { key = Name, type = Type, value = Value }) ->
+  [ { ?LWES_STRING,
+      mondemand_util:metric_name_key (MetricIndex),
+      mondemand_util:stringify (Name)
+    },
+    { ?LWES_STRING,
+      mondemand_util:metric_type_key (MetricIndex),
+      type_to_string (Type)
     },
     { ?LWES_INT_64,
       mondemand_util:metric_value_key (MetricIndex),
@@ -266,7 +308,7 @@ statset_from_string (B) when is_binary(B) ->
         sum = integerify (Sum),
         min = integerify (Min),
         max = integerify (Max),
-        avg = floatify (Avg),
+        avg = integerify (Avg),
         median = integerify (Median),
         pctl_75 = integerify (Pctl75),
         pctl_90 = integerify (Pctl90),
@@ -326,6 +368,16 @@ floatify (L) when is_list (L) ->
         I -> I + 0.0
       end
   end.
+
+string_to_type (L) when is_list(L) ->
+  string_to_type (list_to_binary (L));
+string_to_type (<<"gauge">>)   -> gauge;
+string_to_type (<<"counter">>) -> counter;
+string_to_type (<<"statset">>) -> statset.
+
+type_to_string (gauge)   -> <<"gauge">>;
+type_to_string (counter) -> <<"counter">>;
+type_to_string (statset) -> <<"statset">>.
 
 
 %-=====================================================================-

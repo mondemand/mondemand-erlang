@@ -34,6 +34,10 @@
           millis_to_next_round_minute/1
          ]).
 
+%% Other functions
+-export ([ listen/1,
+           dummy/0 ]).
+
 -define(KILO, 1000).
 -define(MEGA, 1000000).
 -define(GIGA, 1000000000).
@@ -147,6 +151,24 @@ join ([H|T], S, []) ->
   join (T,S,[H]);
 join ([H|T], S, A) ->
   join (T,S,[H,S|A]).
+
+listen (Config) ->
+  {ok, L} = lwes:open (listener, Config),
+  lwes:listen (L,
+               fun (E, S) ->
+                 Stats = mondemand_stats:from_lwes (E),
+                 io:format ("~p~n",[Stats]),
+                 S
+               end,
+               dict,
+               ok).
+
+dummy () ->
+  [ mondemand:add_sample(foo,stuff,I)
+   || I <- lists:seq (1,20)
+  ],
+  mondemand:increment(foo,bar),
+  mondemand:set(foo,blah,50).
 
 %-=====================================================================-
 %-                            Test Functions                           -

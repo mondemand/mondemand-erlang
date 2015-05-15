@@ -42,31 +42,54 @@
 
 %% API
 -export([ start_link/0,
+          get_state/0,
 
+          % counter functions
           create_counter/2,
           create_counter/3,
+          create_counter/4,
+          create_counter/5,
           increment/2,
           increment/3,
           increment/4,
+          fetch_counter/2,
+          fetch_counter/3,
+          remove_counter/2,
+          remove_counter/3,
 
+          % gauge functions
           create_gauge/2,
           create_gauge/3,
+          create_gauge/4,
+          create_gauge/5,
           set/3,
           set/4,
+          fetch_gauge/2,
+          fetch_gauge/3,
+          remove_gauge/2,
+          remove_gauge/3,
 
+          % sample set functions
+          create_sample_set/2,
           create_sample_set/3,
           create_sample_set/4,
+          create_sample_set/5,
           create_sample_set/6,
           add_sample/3,
           add_sample/4,
+          fetch_sample_set/2,
+          fetch_sample_set/3,
+          remove_sample_set/2,
+          remove_sample_set/3,
+
           all_sample_set_stats/0,
 
-          map/1,
-          statset/6,
-          flush_stats_sets/0,
+          map_now/1,
+          map_then/2,
+          map/2,
+
+          flush/2,
           config/0,
-          metrics/0,
-          to_stats/1,
           all/0,
           reset_stats/0
         ]).
@@ -80,11 +103,10 @@
             code_change/3
           ]).
 
--record (state,  {timer}).
+-record (state,  {}).
+-record (mdkey,  {type, prog_id, context, key}).
 -record (config, {key,
-                  type,
                   description,
-                  table,
                   max_sample_size,
                   statistics
                  }).
@@ -98,8 +120,6 @@
                      pctl_75, pctl_90, pctl_95, pctl_98, pctl_99]).
 
 -define (CONFIG_KEY_INDEX, #config.key).
--define (CONFIG_TYPE_INDEX, #config.type).
--define (CONFIG_DESCRIPTION_INDEX, #config.description).
 
 -define (METRIC_KEY_INDEX, #metric.key).
 -define (METRIC_TYPE_INDEX, #metric.type).
@@ -110,76 +130,121 @@
 -define (STATSET_COUNT_INDEX, 3).
 -define (STATSET_SUM_INDEX,   4).
 
-
-% LWES uses a signed int 64, so use that as the max metric value, so we
-% reset at the same rate
--define (MAX_METRIC_VALUE, 9223372036854775807).
-
 %-=====================================================================-
 %-                                  API                                -
 %-=====================================================================-
 start_link() ->
   gen_server:start_link ({local, ?MODULE}, ?MODULE, [], []).
 
-create_counter (Key, Description) ->
-  create_counter (Key, Description, 0).
+get_state() ->
+  gen_server:call (?MODULE, get_state).
 
-create_counter (Key, Description, Amount) ->
-  add_new_config (Key, counter, Description),
-  ets:insert_new (?STATS_TABLE, #metric {key = Key, value = Amount}).
+create_counter (ProgId, Key) ->
+  create_counter (ProgId, Key, [], "", 0).
+create_counter (ProgId, Key, Description) ->
+  create_counter (ProgId, Key, [], Description, 0).
+create_counter (ProgId, Key, Context, Description) ->
+  create_counter (ProgId, Key, Context, Description, 0).
+create_counter (ProgId, Key, Context, Description, Amount)
+  when is_integer (Amount), is_list (Context) ->
+  InternalKey = calculate_key (ProgId, Context, counter, Key),
+  add_new_config (InternalKey, Description),
+  case ets:insert_new (?STATS_TABLE,
+                       #metric {key = InternalKey, value = Amount}) of
+    true -> ok;
+    false -> {error, already_created}
+  end.
 
 increment (ProgId, Key) ->
-  increment (ProgId, Key, 1, []).
-
-increment (ProgId, Key, Amount) when is_integer (Amount) ->
-  increment (ProgId, Key, Amount, []).
-
-increment (ProgId, Key, Amount, Context)
+  increment (ProgId, Key, [], 1).
+increment (ProgId, Key, Amount)
+  when is_integer (Amount) ->
+  increment (ProgId, Key, [], Amount);
+increment (ProgId, Key, Context)
+  when is_list (Context) ->
+  increment (ProgId, Key, Context, 1).
+increment (ProgId, Key, Context, Amount)
   when is_integer (Amount), is_list (Context) ->
   InternalKey = calculate_key (ProgId, Context, counter, Key),
   try_update_counter (InternalKey, Amount).
 
-try_update_counter (Key, Amount) ->
+fetch_counter (ProgId, Key) ->
+  fetch_counter (ProgId, Key, []).
+fetch_counter (ProgId, Key, Context) ->
+  InternalKey = calculate_key (ProgId, Context, counter, Key),
+  return_if_exists (InternalKey, ?STATS_TABLE).
+
+remove_counter (ProgId, Key) ->
+  remove_counter (ProgId, Key, []).
+remove_counter (ProgId, Key, Context) ->
+  InternalKey = calculate_key (ProgId, Context, counter, Key),
+  remove_metric (InternalKey, ?STATS_TABLE).
+
+update_counter (InternalKey, Amount) when Amount >= 0 ->
+  ets:update_counter (?STATS_TABLE, InternalKey,
+                      {?METRIC_VALUE_INDEX, Amount, ?MAX_METRIC_VALUE, 0});
+update_counter (InternalKey, Amount) when Amount < 0 ->
+  ets:update_counter (?STATS_TABLE, InternalKey,
+                      {?METRIC_VALUE_INDEX, Amount, ?MIN_METRIC_VALUE, 0}).
+
+try_update_counter (InternalKey =
+                      #mdkey { prog_id = ProgId,
+                               context = Context,
+                               key = Key
+                             },
+                    Amount) ->
   % LWES is sending int64 values, so wrap at the max int64 integer back to
   % zero
-  try ets:update_counter (?STATS_TABLE, Key,
-                          {?METRIC_VALUE_INDEX, Amount,
-                           ?MAX_METRIC_VALUE, 0}) of
-    _ -> ok
+  try update_counter (InternalKey, Amount) of
+    V -> {ok,V}
   catch
     error:badarg ->
       % the key probably doesn't exist, so create with an empty description
-      case create_counter (Key, "", Amount) of
-        true -> ok;
-        false ->
+      case create_counter (ProgId, Key, Context, "", Amount) of
+        ok -> {ok, Amount}; % may not always be true if simultaneous updates
+                            % are happening, but probably mostly true
+        { error, already_created }->
           % create failed, so someone else probably created it, so just
           % try again this time without the catch
-          ets:update_counter (?STATS_TABLE, Key,
-                              {?METRIC_VALUE_INDEX, Amount,
-                               ?MAX_METRIC_VALUE, 0}),
-          ok
+          V = update_counter (InternalKey, Amount),
+          {ok, V}
       end
   end.
 
-create_gauge (Key, Description) ->
-  create_gauge (Key, Description, 0).
-
-create_gauge (Key, Description, Amount) ->
-  add_new_config (Key, gauge, Description),
-  ets:insert (?STATS_TABLE, #metric {key = Key, value = Amount}).
+create_gauge (ProgId, Key) ->
+  create_gauge (ProgId, Key, [], "", 0).
+create_gauge (ProgId, Key, Description) ->
+  create_gauge (ProgId, Key, [], Description, 0).
+create_gauge (ProgId, Key, Context, Description) ->
+  create_gauge (ProgId, Key, Context, Description, 0).
+create_gauge (ProgId, Key, Context, Description, Amount) ->
+  InternalKey = calculate_key (ProgId, Context, gauge, Key),
+  add_new_config (InternalKey, Description),
+  case ets:insert_new (?STATS_TABLE,
+                       #metric {key = InternalKey, value = Amount}) of
+    true -> ok;
+    false -> {error, already_created}
+  end.
 
 set (ProgId, Key, Amount) ->
-  set (ProgId, Key, Amount, []).
-
-set (ProgId, Key, Amount, Context) ->
+  set (ProgId, Key, [], Amount).
+set (ProgId, Key, Context, Amount) ->
   InternalKey = calculate_key (ProgId, Context, gauge, Key),
 
   % if we would overflow a gauge, instead of going negative just leave it
   % at the max value and return false
   {Overflowed, RealAmount} =
-    case Amount =< ?MAX_METRIC_VALUE of
-      true -> {false, Amount};
-      false -> {true, ?MAX_METRIC_VALUE}
+    case Amount >= 0 of
+      true ->
+        case Amount =< ?MAX_METRIC_VALUE of
+          true -> {false, Amount};
+          false -> {true, ?MAX_METRIC_VALUE}
+        end;
+      false ->
+        case Amount >= ?MIN_METRIC_VALUE of
+          true -> {false, Amount};
+          false -> {true, ?MIN_METRIC_VALUE}
+        end
     end,
 
   case try_update_gauge (InternalKey, RealAmount) of
@@ -191,78 +256,76 @@ set (ProgId, Key, Amount, Context) ->
       end
   end.
 
-try_update_gauge (Key, Amount) ->
+fetch_gauge (ProgId, Key) ->
+  fetch_gauge (ProgId, Key, []).
+fetch_gauge (ProgId, Key, Context) ->
+  InternalKey = calculate_key (ProgId, Context, gauge, Key),
+  return_if_exists (InternalKey, ?STATS_TABLE).
+
+remove_gauge (ProgId, Key) ->
+  remove_gauge (ProgId, Key, []).
+remove_gauge (ProgId, Key, Context) ->
+  InternalKey = calculate_key (ProgId, Context, gauge, Key),
+  remove_metric (InternalKey, ?STATS_TABLE).
+
+try_update_gauge (InternalKey =
+                      #mdkey { prog_id = ProgId,
+                               context = Context,
+                               key = Key
+                             },
+                  Amount) ->
   % use update_element for gauges as we only want the last value
   case
-    ets:update_element (?STATS_TABLE, Key, [{?METRIC_VALUE_INDEX, Amount}])
+    ets:update_element (?STATS_TABLE, InternalKey,
+                        [{?METRIC_VALUE_INDEX, Amount}])
   of
     true -> true;
     false ->
       % the key probably doesn't exist, so create with an empty description
-      case create_gauge (Key, "", Amount) of
-        true -> true;
-        false ->
+      case create_gauge (ProgId, Key, Context, "", Amount) of
+        ok -> true;
+        {error, already_created} ->
           % create failed, so someone else probably created it, so just
           % try again this time without the case
-          ets:update_element (?STATS_TABLE, Key, [{?METRIC_VALUE_INDEX, Amount}])
+          ets:update_element (?STATS_TABLE, InternalKey,
+                              [{?METRIC_VALUE_INDEX, Amount}])
       end
   end.
 
+create_sample_set (ProgId, Key) ->
+  create_sample_set (ProgId, Key, [], "",
+                     ?DEFAULT_MAX_SAMPLE_SIZE, ?DEFAULT_STATS).
 create_sample_set (ProgId, Key, Description) ->
-  create_sample_set (ProgId, Key, [], Description).
-
+  create_sample_set (ProgId, Key, [], Description,
+                     ?DEFAULT_MAX_SAMPLE_SIZE, ?DEFAULT_STATS).
 create_sample_set (ProgId, Key, Context, Description) ->
   create_sample_set (ProgId, Key, Context, Description,
                      ?DEFAULT_MAX_SAMPLE_SIZE, ?DEFAULT_STATS).
-
+create_sample_set (ProgId, Key, Context, Description, Max) ->
+  create_sample_set (ProgId, Key, Context, Description,
+                     Max, ?DEFAULT_STATS).
 create_sample_set (ProgId, Key, Context, Description, Max, Stats) ->
-  InternalKey = calculate_key (ProgId, Context, sampleset, Key),
+  InternalKey = calculate_key (ProgId, Context, statset, Key),
   create_sample_set_internal (InternalKey, Description, Max, Stats).
 
-create_sample_set_internal (InternalKey = {_,_,_,_}) ->
+create_sample_set_internal (InternalKey = #mdkey{}) ->
   #config { max_sample_size = Max, statistics = Stats } =
     lookup_config (InternalKey),
   create_sample_set_internal (InternalKey, "", Max, Stats).
 
 create_sample_set_internal (InternalKey, Description, Max, Stats) ->
-  add_new_config (InternalKey, sampleset, Description, Max, Stats),
+  add_new_config (InternalKey, Description, Max, Stats),
   % Creates a new entry of the form
   % { Key, Count, Sum, Sample1 ... SampleMax }
-  ets:insert_new (minute_tab (mondemand_util:current_minute()),
-    list_to_tuple (
-      [ InternalKey, Max, 0, 0
-        | [ 0 || _ <- lists:seq (1, Max) ]
-      ])
-  ).
-
-lookup_config (Key) ->
-  case ets:lookup (?CONFIG_TABLE, Key) of
-    [] -> lookup_default_config ();
-    [C = #config { }] -> C
+  case ets:insert_new (minute_tab (mondemand_util:current_minute()),
+                        list_to_tuple (
+                          [ InternalKey, Max, 0, 0
+                            | [ 0 || _ <- lists:seq (1, Max) ]
+                          ])
+                      ) of
+    true -> ok;
+    false -> {error, already_created}
   end.
-
-lookup_default_config () ->
-  case ets:lookup (?CONFIG_TABLE, '$default_config') of
-    [C = #config {}] -> C;
-    [] -> undefined
-  end.
-
-add_new_config (Key, Type, Description) ->
-  C = lookup_default_config (),
-  NewConfig = C#config { key = Key,
-                         type = Type,
-                         description = Description },
-  ets:insert_new (?CONFIG_TABLE, NewConfig).
-
-add_new_config (Key, Type, Description, Max, Stats) ->
-  C = lookup_default_config (),
-  NewConfig = C#config { key = Key,
-                         type = Type,
-                         description = Description,
-                         max_sample_size = Max,
-                         statistics = normalize_stats (Stats) },
-  ets:insert_new (?CONFIG_TABLE, NewConfig),
-  C#config.table.
 
 update_sampleset (Table, Key, Value) ->
   ets:update_counter (Table, Key,
@@ -286,15 +349,19 @@ try_update_sampleset (Table, InternalKey, Value) ->
   end.
 
 add_sample (ProgId, Key, Value) ->
-  add_sample (ProgId, Key, Value, []).
+  add_sample (ProgId, Key, [], Value).
 
-add_sample (ProgId, Key, Value, Context) ->
-  InternalKey = calculate_key (ProgId, Context, sampleset, Key),
+% this implements reservoir sampling of values
+%   http://en.wikipedia.org/wiki/Reservoir_sampling
+% in an ets table
+add_sample (ProgId, Key, Context, Value) ->
+  InternalKey = calculate_key (ProgId, Context, statset, Key),
 
   Tid = minute_tab (mondemand_util:current_minute()),
 
   % First we'll update the count and sum, and we care about the count
-  % as it gives us an index into the list of samples
+  % as it gives us an index into the list of samples, also we'll get
+  % back the max size, saving us a lookup in the config table
   [Max, UpdateCount] = try_update_sampleset (Tid, InternalKey, Value),
 
   % If we've already collected the max samples we'll generate a random
@@ -322,14 +389,90 @@ add_sample (ProgId, Key, Value, Context) ->
   % finally we'll update the value
   case IndexToUpdate of
     skip -> true;
-    I -> ets:update_element (Tid, InternalKey, {I+?STATSET_SUM_INDEX,Value})
+    I -> ets:update_element (Tid, InternalKey, {?STATSET_SUM_INDEX+I,Value})
   end.
+
+fetch_sample_set (ProgId, Key) ->
+  fetch_sample_set (ProgId, Key, []).
+
+fetch_sample_set (ProgId, Key, Context) ->
+  InternalKey = calculate_key (ProgId, Context, statset, Key),
+  Table = minute_tab (mondemand_util:current_minute()),
+  return_if_exists (InternalKey, Table).
+
+remove_sample_set (ProgId, Key) ->
+  remove_sample_set (ProgId, Key, []).
+remove_sample_set (ProgId, Key, Context) ->
+  InternalKey = calculate_key (ProgId, Context, statset, Key),
+  Table = minute_tab (mondemand_util:current_minute()),
+  remove_metric (InternalKey, Table).
+
+config_exists (Key) ->
+  case ets:lookup (?CONFIG_TABLE, Key) of
+    [] -> false;
+    [#config{}] -> true
+  end.
+
+return_if_exists (Key, Table) ->
+  case config_exists (Key) of
+    true ->
+      #metric {value = V} = lookup_metric (Key, Table),
+      V;
+    false ->
+      undefined
+  end.
+
+lookup_config (Key) ->
+  case ets:lookup (?CONFIG_TABLE, Key) of
+    [] -> lookup_default_config ();
+    [C = #config { }] -> C
+  end.
+
+lookup_default_config () ->
+  case ets:lookup (?CONFIG_TABLE, '$default_config') of
+    [C = #config {}] -> C;
+    [] -> undefined
+  end.
+
+add_new_config (Key, Description) ->
+  C = lookup_default_config (),
+  NewConfig = C#config { key = Key,
+                         description = Description },
+  ets:insert_new (?CONFIG_TABLE, NewConfig).
+
+add_new_config (Key, Description, Max, Stats) ->
+  C = lookup_default_config (),
+  NewConfig = C#config { key = Key,
+                         description = Description,
+                         max_sample_size = Max,
+                         statistics = normalize_stats (Stats) },
+  ets:insert_new (?CONFIG_TABLE, NewConfig).
 
 all_sample_set_stats () ->
   ?ALL_STATS.
 
 config () ->
-  ets:tab2list (?CONFIG_TABLE).
+  io:format ("~1s ~-21s ~-35s ~-20s~n",["t", "prog_id", "key", "value"]),
+  ets:foldl (fun
+               (#config {key = '$default_config'}, A) ->
+                 A;
+               (#config {
+                  key = #mdkey { type = _Type, prog_id = _ProgId,
+                                 context = _Context, key = _Key }
+                }, A) ->
+                 A
+             end,
+             ok,
+             ?CONFIG_TABLE).
+
+map_now (Function) ->
+  StatsSetTable = minute_tab (mondemand_util:current_minute()),
+  map (Function, StatsSetTable).
+
+map_then (Function, Ago) ->
+  PreviousMinute = minutes_ago (mondemand_util:current_minute(), Ago),
+  StatsSetTable = minute_tab (PreviousMinute),
+  map (Function, StatsSetTable).
 
 % I want to iterate over the config table, collapsing all metrics for a
 % particular program id and context into a group so they can all be processed
@@ -338,18 +481,16 @@ config () ->
 % I want to use ets:first/1 and ets:next/2 so I can eventually set some rules
 % about how they are processed in terms of time spent overall
 %
-map (Function) ->
+map (Function, StatsSetTable) ->
   % there a couple of things we'd like to not recalculate but are probably
   % used over and over, so get them here and pass them through
   Host = net_adm:localhost (),
-  PreviousMinute = prev_min (mondemand_util:current_minute()),
-  StatsSetTable = minute_tab (PreviousMinute),
 
   case ets:first (?CONFIG_TABLE) of
     '$end_of_table' -> [];
     FirstKey ->
       % put the first into the current list to collapse
-      map (Function, {Host, PreviousMinute, StatsSetTable}, [FirstKey])
+      map (Function, {Host, StatsSetTable}, [FirstKey])
   end.
 
 % need to skip the config as that's not what we want to map over
@@ -361,14 +502,14 @@ map (Function, State, [Key = '$default_config']) ->
   end;
 map (Function, State,
      % match out the ProgId and Context from the current collapsed list
-     AllKeys = [LastKey = {ProgId,Context,_,_}|_]) ->
+     AllKeys = [LastKey = #mdkey {prog_id = ProgId, context = Context}|_]) ->
 
   case ets:next (?CONFIG_TABLE,LastKey) of
     '$end_of_table' ->
       % we hit the end of the table, so just call the function with the
       % current set of matched keys
       Function (construct_stats_msg (AllKeys, State));
-    Key = {ProgId, Context, _, _} ->
+    Key = #mdkey {prog_id = ProgId, context = Context} ->
       % this particular entry has the same ProgId and Context, so add it
       % to the list of keys which are grouped together
       map (Function, State, [Key|AllKeys]);
@@ -379,14 +520,14 @@ map (Function, State,
       map (Function, State, [NonMatchingKey])
   end.
 
-construct_stats_msg (AllKeys = [{ProgId, Context,_,_}|_],
-                     {Host, _, Table}) ->
+construct_stats_msg (AllKeys = [#mdkey {prog_id = ProgId, context = Context}|_],
+                     {Host, Table}) ->
   Metrics = [ lookup_metric (I, Table) || I <- AllKeys ],
   mondemand_stats:new (ProgId, Context, Metrics, Host).
 
 % this function looks up metrics from the different internal DB's and
 % unboxes them
-lookup_metric (InternalKey = {_,_,Type,Key}, Table) ->
+lookup_metric (InternalKey = #mdkey {type = Type, key = Key}, Table) ->
   case Type of
     I when I =:= counter; I =:= gauge ->
       case ets:lookup (?STATS_TABLE, InternalKey) of
@@ -395,83 +536,77 @@ lookup_metric (InternalKey = {_,_,Type,Key}, Table) ->
         [#metric {value = V}] ->
           #metric { key = Key, type = I, value = V }
       end;
-    I when I =:= sampleset ->
+    I when I =:= statset ->
       #config { statistics = Stats } = lookup_config (InternalKey),
       case ets:lookup (Table, InternalKey) of
         [] ->
           % special case, for filling out an empty statset
-          #metric { key = Key, type = I, value = statset (0, 0, 0, 0, [], Stats) };
+          #metric { key = Key, type = I,
+                    value = statset (0, 0, 0, 0, [], Stats)
+                  };
         [Entry] ->
-          #metric { key = Key, type = I, value = ets_to_statset (Entry, Stats) }
+          #metric { key = Key, type = I,
+                    value = ets_to_statset (Entry, Stats)
+                  }
       end
   end.
 
-metrics () ->
-  io:format ("~1s ~-21s ~-35s ~-20s~n",["t", "prog_id", "key", "value"]),
-  io:format ("  ~-78s~n",["contexts"]),
-  io:format ("~1s ~-21s ~-35s ~-20s~n",["-","---------------------",
-                                    "-----------------------------------",
-                                    "--------------------"]),
+remove_metric (InternalKey = #mdkey {type = Type}, Table) ->
+  ets:delete (?CONFIG_TABLE, InternalKey),
+  case Type of
+    I when I =:= counter; I =:= gauge ->
+      ets:delete (?STATS_TABLE, InternalKey);
+    I when I =:= statset ->
+      ets:delete (Table, InternalKey)
+  end.
 
-  [
-    begin
-      io:format ("~1s ~-21s ~-35s ~-20b~n",
-                 [
-                   case Type of
-                     counter -> "c";
-                     gauge -> "g"
-                   end,
-                   case ProgId of
-                     undefined -> "unknown";
-                     P ->  mondemand_util:stringify (P)
-                   end,
-                   mondemand_util:stringify (Key),
-                   Value
-                 ]),
-      lists:foreach (fun ({CKey, CValue}) ->
-                           io:format ("  {~s, ~s}~n", [
-                               mondemand_util:stringify (CKey),
-                               mondemand_util:stringify (CValue)
-                             ])
-                     end, Context)
-    end
-    || #metric { key = {ProgId, Context, Type, Key}, value = Value }
-    <- lists:sort (ets:tab2list (?STATS_TABLE))
-  ],
+graphite_type_string (ProgId, Key, Context, Type) ->
+  Context_String =
+    mondemand_util:join ( [ io_lib:format ("~s_~s",
+                                       [mondemand_util:stringify (K),
+                                        mondemand_util:stringify (V)
+                                       ])
+                            || {K, V} <- Context
+                          ], "."
+                        ),
+  io_lib:format ("~s.~s~s.*.~s",
+                 [ProgId, Key,
+                  case Context_String of
+                    [] -> "";
+                    C -> [".",C]
+                  end,
+                  Type]).
+
+all () ->
+  io:format ("~-58s ~-20s~n",["key", "value"]),
+  io:format ("~-58s ~-20s~n",[
+             "----------------------------------------------------------",
+             "--------------------"]),
+  map_now (fun (#stats_msg {prog_id = ProgId,
+                            context = Context,
+                            metrics = Metrics}) ->
+             [
+               case T of
+                 IT when IT =:= gauge; IT =:= counter ->
+                   io:format ("~-58s ~-20b~n",
+                              [graphite_type_string (ProgId, K, Context, T),
+                               V]);
+                 statset ->
+                   [
+                     case mondemand_stats:get_statset (S, V) of
+                       undefined -> ok;
+                       SV ->
+                         io:format ("~-58s ~-20b~n",
+                              [graphite_type_string (ProgId, K, Context, S),
+                               SV])
+                     end
+                     || S <- all_sample_set_stats ()
+                   ]
+               end
+               || #metric { type = T, key = K, value = V } <- Metrics
+             ]
+           end),
   ok.
-
-to_stats (Func) ->
-  AllEts = ets:tab2list (?STATS_TABLE),
-  Host = net_adm:localhost (),
-
-  % struct in ets is
-  %  { { ProgId, Context, Type, Key }, Value }
-  % but I want to send this in the fewest number of mondemand-tool calls
-  % so I need to get all {ProgId, Context} pairs, then unique sort them,
-  % after that send_stats for all stats which match ProgId/Context pair
-  [ begin
-      Metrics =
-        [ { T, K, V }
-          || #metric { key = { P2, C2, T, K }, value = V }
-          <- AllEts,
-             P2 =:= ProgId,
-             C2 =:= Context ],
-      Func (mondemand_stats:new (ProgId, Context, Metrics, Host))
-    end
-    || { ProgId, Context }
-    <- lists:usort ( [ {EtsProgId, EtsContext}
-                       || #metric { key = {EtsProgId, EtsContext, _, _} }
-                       <- AllEts
-                     ])
-  ].
-
-%statset_tid () ->
-%  gen_server:call (?MODULE, {statsset_tid}).
-%statsets () ->
-%  Tid = statset_tid (),
-%  AllEts = get_stats_sets (Tid),
-%  io:format ("~p",[AllEts]),
-%  ok.
 
 %-=====================================================================-
 %-                        gen_server callbacks                         -
@@ -503,7 +638,6 @@ init([]) ->
   % make sure there's a default config
   ets:insert_new (?CONFIG_TABLE,
                   #config { key = '$default_config',
-                            type = config,
                             max_sample_size = ?DEFAULT_MAX_SAMPLE_SIZE,
                             statistics = ?DEFAULT_STATS }),
 
@@ -515,27 +649,16 @@ init([]) ->
                            {read_concurrency, false},
                            {keypos, ?METRIC_KEY_INDEX}
                          ]),
-  % shoot for starting flushes a second after the next minute starts
-  {ok, _} = timer:send_after (
-              mondemand_util:millis_to_next_round_minute() + 1000,
-              ?MODULE,
-              flush_stats_sets),
   {ok, #state {}}.
 
-
+handle_call (get_state, _From, State) ->
+  {reply, State, State};
 handle_call (_Request, _From, State) ->
   {reply, ok, State}.
 
 handle_cast (_Request, State) ->
   {noreply, State}.
 
-handle_info (flush_stats_sets, State = #state {timer = undefined}) ->
-  {ok, TRef} = timer:send_interval (60000, ?MODULE, flush_stats_sets),
-  flush_stats_sets (),
-  {noreply, State#state {timer = TRef}};
-handle_info (flush_stats_sets, State = #state {}) ->
-  flush_stats_sets (),
-  {noreply, State#state {}};
 handle_info (_Info, State) ->
   {noreply, State}.
 
@@ -549,17 +672,6 @@ code_change (_OldVsn, State, _Extra) ->
 %-=====================================================================-
 %-                        Internal Functions                           -
 %-=====================================================================-
-%update_all (Tid) ->
-%  update_all (ets:first (?CONFIG_TABLE), Tid).
-%
-%update_all ('$end_of_table', _) -> ok;
-%update_all (Key, Tid) ->
-%  ets:update_element (?CONFIG_TABLE, Key, [{?CONFIG_TABLE_INDEX, Tid}]),
-%  update_all (ets:next (?CONFIG_TABLE, Key), Tid).
-%
-%update_default (Tid) ->
-%  ets:update_element (?CONFIG_TABLE, '$default_config',
-%                      [{?CONFIG_TABLE_INDEX, Tid}]).
 
 normalize_stats (undefined) -> ?DEFAULT_STATS;
 normalize_stats ("") -> ?DEFAULT_STATS;
@@ -583,25 +695,17 @@ normalize (sum) -> sum;
 normalize (count) -> count;
 normalize (_) -> "".
 
-prev_min (Min) ->
-  case Min - 1 of
-    -1 -> 59;
-    Previous -> Previous
+minutes_ago (MinuteNow, Ago) ->
+  case MinuteNow - Ago of
+    N when N < 0 -> 60 + N;
+    N -> N
   end.
 
-flush_stats_sets () ->
-  MinuteToFlush = minute_tab (prev_min (mondemand_util:current_minute())),
-%  error_logger:info_msg ("flushing ~p",[MinuteToFlush]),
-  process_stats_sets (MinuteToFlush,
-                      fun (S) ->
-                        io:format ("process ~p~n",[S])
-                      end
-  ),
-  ok.
-%  TabData = get_stats_sets (Table),
-%  ets:delete (Table),
-%  TabData.
-
+flush (MinutesAgo, Function) ->
+  PreviousMinute = minutes_ago (mondemand_util:current_minute(), MinutesAgo),
+  StatsSetTable = minute_tab (PreviousMinute),
+  map (Function, StatsSetTable),
+  ets:delete_all_objects (StatsSetTable).
 
 ets_to_statset (Data, Stats) ->
   % this needs to match the create side
@@ -625,11 +729,11 @@ ets_to_statset (Data, Stats) ->
                     SamplesCount+0.5
                 end,
 
-  % we fold over the list of stats we are calculating and
-  % construct a #statset{} record
   statset (Count, Sum, SamplesCount, ScaledCount, Sorted, Stats).
 
 statset (Count, Sum, SamplesCount, ScaledCount, Sorted, Stats) ->
+  % we fold over the list of stats we are calculating and
+  % construct a #statset{} record
   {_,_,_,_,_,StatSet} =
     lists:foldl (
       fun stats_to_statset/2,
@@ -737,19 +841,6 @@ stats_to_statset (pctl_99,
       end,
       StatSet) }.
 
-process_stats_sets (Table, _Function) ->
-%  Host = net_adm:localhost (),
-%  ets:foldl (fun (Data, Accum) ->
-%               % invoke the function for the data
-%               Function (ets_to_statset (Data, Host)),
-%               Accum
-%             end,
-%             ok,
-%             Table),
-  ets:delete_all_objects (Table).
-
-all () ->
-  ets:tab2list (?STATS_TABLE).
 
 reset_stats () ->
   ets:foldl (fun ({K, _}, Prev) ->
@@ -759,8 +850,11 @@ reset_stats () ->
              ?STATS_TABLE).
 
 calculate_key (ProgId, Context, Type, Key) ->
-  {ProgId, lists:keysort (1, Context), Type, Key}.
-
+  #mdkey {type = Type,
+          prog_id = ProgId,
+          context = lists:keysort (1, Context),
+          key =Key
+         }.
 
 minute_tab (0)  -> md_min_00;
 minute_tab (1)  -> md_min_01;
@@ -826,7 +920,7 @@ minute_tab (59) -> md_min_59.
 %-=====================================================================-
 %-                            Test Functions                           -
 %-=====================================================================-
--ifdef (TEST).
+%-ifdef (TEST).
 -include_lib ("eunit/include/eunit.hrl").
 
 setup () ->
@@ -841,15 +935,87 @@ cleanup (Pid) -> exit (Pid, normal).
 % need to randomly create config keys and test looking them up in a sorted
 % fashion  (basically test set versus ordered_set for a bunch of metrics)
 %random_atom
- 
 
 config_perf_test_ () ->
   { setup,
     fun setup/0,
     fun cleanup/1,
     [
+      % tests using create_counter first
+      ?_assertEqual (undefined, fetch_counter (my_prog1, my_metric1)),
+      ?_assertEqual (ok, create_counter (my_prog1, my_metric1)),
+      ?_assertEqual ({error, already_created}, create_counter (my_prog1, my_metric1)),
+      ?_assertEqual (0, fetch_counter (my_prog1, my_metric1)),
+      ?_assertEqual ({ok,1}, increment (my_prog1, my_metric1)),
+      ?_assertEqual (1, fetch_counter (my_prog1, my_metric1)),
+      ?_assertEqual ({ok,2}, increment (my_prog1, my_metric1)),
+      ?_assertEqual ({ok,3}, increment (my_prog1, my_metric1)),
+      ?_assertEqual ({ok,4}, increment (my_prog1, my_metric1)),
+      ?_assertEqual (4, fetch_counter (my_prog1, my_metric1)),
+      ?_assertEqual (true, remove_counter (my_prog1, my_metric1)),
+      ?_assertEqual (undefined, fetch_counter (my_prog1, my_metric1)),
+
+      % test using automatic creation of counters
+      ?_assertEqual (undefined, fetch_counter (my_prog1, my_metric1)),
+      ?_assertEqual ({ok,1}, increment (my_prog1, my_metric1)),
+      ?_assertEqual (1, fetch_counter (my_prog1, my_metric1)),
+      ?_assertEqual (true, remove_counter (my_prog1, my_metric1)),
+      ?_assertEqual (undefined, fetch_counter (my_prog1, my_metric1)),
+
+      % tests using create_gauge first
+      ?_assertEqual (undefined, fetch_gauge (my_prog1, my_metric1)),
+      ?_assertEqual (ok, create_gauge (my_prog1, my_metric1)),
+      ?_assertEqual ({error, already_created}, create_gauge (my_prog1, my_metric1)),
+      ?_assertEqual (0, fetch_gauge (my_prog1, my_metric1)),
+      ?_assertEqual (ok, set (my_prog1, my_metric1, 5)),
+      ?_assertEqual (5, fetch_gauge (my_prog1, my_metric1)),
+      ?_assertEqual (ok, set (my_prog1, my_metric1, 6)),
+      ?_assertEqual (ok, set (my_prog1, my_metric1, 4)),
+      ?_assertEqual (4, fetch_gauge (my_prog1, my_metric1)),
+      ?_assertEqual (true, remove_gauge (my_prog1, my_metric1)),
+      ?_assertEqual (undefined, fetch_gauge (my_prog1, my_metric1)),
+
+      % tests using sample sets
+      ?_assertEqual (undefined, fetch_sample_set (my_prog1, my_metric1)),
+      % default size is 10
+      ?_assertEqual (ok, create_sample_set (my_prog1, my_metric1)),
+      % add some
+      fun () ->
+        [
+          ?assertEqual (true, add_sample (my_prog1, my_metric1, N))
+          || N <- lists:seq (1, 5)
+        ]
+      end,
+      % check their values
+      fun () ->
+        SS = fetch_sample_set (my_prog1, my_metric1),
+        ?assertEqual (5, mondemand_stats:get_statset (count, SS)),
+        ?assertEqual (15, mondemand_stats:get_statset (sum, SS)),
+        ?assertEqual (1, mondemand_stats:get_statset (min, SS)),
+        ?assertEqual (5, mondemand_stats:get_statset (max, SS))
+      end,
+      % add a few more
+      fun () ->
+        [
+          ?assertEqual (true, add_sample (my_prog1, my_metric1, N))
+          || N <- lists:seq (6, 20)
+        ]
+      end,
+      fun () ->
+        SS = fetch_sample_set (my_prog1, my_metric1),
+        ?assertEqual (20, mondemand_stats:get_statset (count, SS)),
+        ?assertEqual (lists:sum(lists:seq(1,20)),
+                      mondemand_stats:get_statset (sum, SS)),
+        % for min and max since we've been replacing the samples in the
+        % reservoir we can't really assert much other than min will probably
+        % not be 20 and max will probably not be 1
+        Min = mondemand_stats:get_statset (min, SS),
+        ?assertEqual (true, Min < 20),
+        Max = mondemand_stats:get_statset (max, SS),
+        ?assertEqual (true, Max > 1)
+      end,
+      ?_assertEqual (true, remove_sample_set (my_prog1, my_metric1))
     ]
   }.
 
-
--endif.
+%-endif.
