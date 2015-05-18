@@ -121,9 +121,9 @@
 
 -define (CONFIG_KEY_INDEX, #config.key).
 
--define (METRIC_KEY_INDEX, #metric.key).
--define (METRIC_TYPE_INDEX, #metric.type).
--define (METRIC_VALUE_INDEX, #metric.value).
+-define (METRIC_KEY_INDEX, #md_metric.key).
+-define (METRIC_TYPE_INDEX, #md_metric.type).
+-define (METRIC_VALUE_INDEX, #md_metric.value).
 
 -define (STATSET_KEY_INDEX,   1).
 -define (STATSET_MAX_INDEX,   2).
@@ -150,7 +150,7 @@ create_counter (ProgId, Key, Context, Description, Amount)
   InternalKey = calculate_key (ProgId, Context, counter, Key),
   add_new_config (InternalKey, Description),
   case ets:insert_new (?STATS_TABLE,
-                       #metric {key = InternalKey, value = Amount}) of
+                       #md_metric {key = InternalKey, value = Amount}) of
     true -> ok;
     false -> {error, already_created}
   end.
@@ -182,10 +182,12 @@ remove_counter (ProgId, Key, Context) ->
 
 update_counter (InternalKey, Amount) when Amount >= 0 ->
   ets:update_counter (?STATS_TABLE, InternalKey,
-                      {?METRIC_VALUE_INDEX, Amount, ?MAX_METRIC_VALUE, 0});
+                      {?METRIC_VALUE_INDEX, Amount,
+                       ?MD_STATS_MAX_METRIC_VALUE, 0});
 update_counter (InternalKey, Amount) when Amount < 0 ->
   ets:update_counter (?STATS_TABLE, InternalKey,
-                      {?METRIC_VALUE_INDEX, Amount, ?MIN_METRIC_VALUE, 0}).
+                      {?METRIC_VALUE_INDEX, Amount,
+                       ?MD_STATS_MIN_METRIC_VALUE, 0}).
 
 try_update_counter (InternalKey =
                       #mdkey { prog_id = ProgId,
@@ -221,7 +223,7 @@ create_gauge (ProgId, Key, Context, Description, Amount) ->
   InternalKey = calculate_key (ProgId, Context, gauge, Key),
   add_new_config (InternalKey, Description),
   case ets:insert_new (?STATS_TABLE,
-                       #metric {key = InternalKey, value = Amount}) of
+                       #md_metric {key = InternalKey, value = Amount}) of
     true -> ok;
     false -> {error, already_created}
   end.
@@ -236,14 +238,14 @@ set (ProgId, Key, Context, Amount) ->
   {Overflowed, RealAmount} =
     case Amount >= 0 of
       true ->
-        case Amount =< ?MAX_METRIC_VALUE of
+        case Amount =< ?MD_STATS_MAX_METRIC_VALUE of
           true -> {false, Amount};
-          false -> {true, ?MAX_METRIC_VALUE}
+          false -> {true, ?MD_STATS_MAX_METRIC_VALUE}
         end;
       false ->
-        case Amount >= ?MIN_METRIC_VALUE of
+        case Amount >= ?MD_STATS_MIN_METRIC_VALUE of
           true -> {false, Amount};
-          false -> {true, ?MIN_METRIC_VALUE}
+          false -> {true, ?MD_STATS_MIN_METRIC_VALUE}
         end
     end,
 
@@ -416,7 +418,7 @@ config_exists (Key) ->
 return_if_exists (Key, Table) ->
   case config_exists (Key) of
     true ->
-      #metric {value = V} = lookup_metric (Key, Table),
+      #md_metric {value = V} = lookup_metric (Key, Table),
       V;
     false ->
       undefined
@@ -532,22 +534,22 @@ lookup_metric (InternalKey = #mdkey {type = Type, key = Key}, Table) ->
     I when I =:= counter; I =:= gauge ->
       case ets:lookup (?STATS_TABLE, InternalKey) of
         [] ->
-          #metric { key = Key, type = I, value = 0 };
-        [#metric {value = V}] ->
-          #metric { key = Key, type = I, value = V }
+          #md_metric { key = Key, type = I, value = 0 };
+        [#md_metric {value = V}] ->
+          #md_metric { key = Key, type = I, value = V }
       end;
     I when I =:= statset ->
       #config { statistics = Stats } = lookup_config (InternalKey),
       case ets:lookup (Table, InternalKey) of
         [] ->
           % special case, for filling out an empty statset
-          #metric { key = Key, type = I,
-                    value = statset (0, 0, 0, 0, [], Stats)
-                  };
+          #md_metric { key = Key, type = I,
+                       value = statset (0, 0, 0, 0, [], Stats)
+                     };
         [Entry] ->
-          #metric { key = Key, type = I,
-                    value = ets_to_statset (Entry, Stats)
-                  }
+          #md_metric { key = Key, type = I,
+                       value = ets_to_statset (Entry, Stats)
+                     }
       end
   end.
 
@@ -582,9 +584,9 @@ all () ->
   io:format ("~-58s ~-20s~n",[
              "----------------------------------------------------------",
              "--------------------"]),
-  map_now (fun (#stats_msg {prog_id = ProgId,
-                            context = Context,
-                            metrics = Metrics}) ->
+  map_now (fun (#md_stats_msg {prog_id = ProgId,
+                               context = Context,
+                               metrics = Metrics}) ->
              [
                case T of
                  IT when IT =:= gauge; IT =:= counter ->
@@ -603,7 +605,7 @@ all () ->
                      || S <- all_sample_set_stats ()
                    ]
                end
-               || #metric { type = T, key = K, value = V } <- Metrics
+               || #md_metric { type = T, key = K, value = V } <- Metrics
              ]
            end),
   ok.

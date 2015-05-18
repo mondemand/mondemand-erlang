@@ -141,31 +141,31 @@ stats () ->
 send_trace (ProgId, Message, Context) ->
   case Context of
     Dict when is_tuple (Context) andalso element (1, Context) =:= dict ->
-      case mondemand_util:key_in_dict (?TRACE_ID_KEY, Dict)
-        andalso mondemand_util:key_in_dict (?OWNER_ID_KEY, Dict) of
+      case mondemand_util:key_in_dict (?MD_TRACE_ID_KEY, Dict)
+        andalso mondemand_util:key_in_dict (?MD_TRACE_OWNER_KEY, Dict) of
         true ->
           send_event (
             #lwes_event {
-              name = ?TRACE_EVENT,
-              attrs = dict:store (?PROG_ID_KEY, ProgId,
-                        dict:store (?SRC_HOST_KEY, net_adm:localhost(),
-                          dict:store (?MESSAGE_KEY, Message,
+              name = ?MD_TRACE_EVENT,
+              attrs = dict:store (?MD_TRACE_PROG_ID_KEY, ProgId,
+                        dict:store (?MD_TRACE_SRC_HOST_KEY, net_adm:localhost(),
+                          dict:store (?MD_TRACE_MESSAGE_KEY, Message,
                                       Dict)))
             });
         false ->
           {error, required_fields_not_set}
       end;
     List when is_list (Context) ->
-      case mondemand_util:key_in_list (?TRACE_ID_KEY, List)
-        andalso mondemand_util:key_in_list (?OWNER_ID_KEY, List) of
+      case mondemand_util:key_in_list (?MD_TRACE_ID_KEY, List)
+        andalso mondemand_util:key_in_list (?MD_TRACE_OWNER_KEY, List) of
           true ->
             send_event (
               #lwes_event {
-                name = ?TRACE_EVENT,
+                name = ?MD_TRACE_EVENT,
                 attrs = dict:from_list (
-                          [ {?SRC_HOST_KEY, net_adm:localhost() },
-                            {?PROG_ID_KEY, ProgId},
-                            {?MESSAGE_KEY, Message}
+                          [ {?MD_TRACE_SRC_HOST_KEY, net_adm:localhost() },
+                            {?MD_TRACE_PROG_ID_KEY, ProgId},
+                            {?MD_TRACE_MESSAGE_KEY, Message}
                             | List ]
                         )
               });
@@ -181,24 +181,24 @@ send_trace (ProgId, Owner, TraceId, Message, Context) ->
     Dict when is_tuple (Context) andalso element (1, Context) =:= dict ->
       send_event (
         #lwes_event {
-          name = ?TRACE_EVENT,
-          attrs = dict:store (?PROG_ID_KEY, ProgId,
-                    dict:store (?OWNER_ID_KEY, Owner,
-                      dict:store (?TRACE_ID_KEY, TraceId,
-                        dict:store (?SRC_HOST_KEY, net_adm:localhost(),
-                          dict:store (?MESSAGE_KEY, Message,
+          name = ?MD_TRACE_EVENT,
+          attrs = dict:store (?MD_TRACE_PROG_ID_KEY, ProgId,
+                    dict:store (?MD_TRACE_OWNER_KEY, Owner,
+                      dict:store (?MD_TRACE_ID_KEY, TraceId,
+                        dict:store (?MD_TRACE_SRC_HOST_KEY, net_adm:localhost(),
+                          dict:store (?MD_TRACE_MESSAGE_KEY, Message,
                                       Dict)))))
         });
     List when is_list (Context) ->
       send_event (
         #lwes_event {
-          name = ?TRACE_EVENT,
+          name = ?MD_TRACE_EVENT,
           attrs = dict:from_list (
-                    [ { ?PROG_ID_KEY, ProgId },
-                      { ?OWNER_ID_KEY, Owner },
-                      { ?TRACE_ID_KEY, TraceId },
-                      { ?SRC_HOST_KEY, net_adm:localhost() },
-                      { ?MESSAGE_KEY, Message }
+                    [ { ?MD_TRACE_PROG_ID_KEY, ProgId },
+                      { ?MD_TRACE_OWNER_KEY, Owner },
+                      { ?MD_TRACE_ID_KEY, TraceId },
+                      { ?MD_TRACE_SRC_HOST_KEY, net_adm:localhost() },
+                      { ?MD_TRACE_MESSAGE_KEY, Message }
                       | List ]
                   )
         });
@@ -236,7 +236,7 @@ init([]) ->
   IntervalSecs =
     case application:get_env (mondemand, send_interval) of
       {ok, I} when is_integer (I) -> I;
-      _ -> ?DEFAULT_SEND_INTERVAL
+      _ -> ?MD_DEFAULT_SEND_INTERVAL
     end,
 
   % use milliseconds for interval and for jitter

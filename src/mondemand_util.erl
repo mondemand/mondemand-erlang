@@ -1,21 +1,24 @@
 -module (mondemand_util).
 
 -include ("mondemand_internal.hrl").
+-include_lib ("lwes/include/lwes.hrl").
 
--compile({parse_transform, ct_expand}).
-
-% metric functions
--export ([ stringify/1,
-           key_in_dict/2,
-           key_in_list/2,
-           metric_name_key/1,
-           metric_value_key/1,
-           metric_type_key/1,
-           context_name_key/1,
-           context_value_key/1,
-           join/2
+% lwes helper functions
+-export ([ context_from_lwes/1,
+           context_to_lwes/3
          ]).
 
+% util functions
+-export ([ find_in_dict/2,
+           find_in_dict/3,
+           key_in_dict/2,
+           key_in_list/2,
+           binaryify/1,
+           stringify/1,
+           integerify/1,
+           floatify/1,
+           join/2
+         ]).
 %% Time functions
 -export ([
           micros_since_epoch/0,
@@ -37,6 +40,52 @@
 %% Other functions
 -export ([ listen/1,
            dummy/0 ]).
+
+context_from_lwes (Data) ->
+  Num =
+    case dict:find (?MD_CTXT_NUM, Data) of
+      error -> 0;
+      {ok, C} -> C
+    end,
+  { Host, Context } =
+    lists:foldl ( fun (N, {H, A}) ->
+                    K = dict:fetch (context_name_key (N), Data),
+                    V = dict:fetch (context_value_key (N), Data),
+                    case K of
+                      ?MD_HOST -> { V, A };
+                      _ -> { H, [ {K, V} | A ] }
+                    end
+                  end,
+                  { <<"unknown">>, [] },
+                  lists:seq (1,Num)
+                ),
+  { Host, length (Context), lists:keysort (1, Context) }.
+
+context_name_key (N) ->
+  ?ELEMENT_OF_TUPLE_LIST (N, ?MD_CTXT_K).
+
+context_value_key (N) ->
+  ?ELEMENT_OF_TUPLE_LIST (N, ?MD_CTXT_V).
+
+context_to_lwes (Host, NumContexts, Context) ->
+  [
+    { ?LWES_U_INT_16, ?MD_CTXT_NUM, NumContexts + 1},
+    lists:zipwith (fun context_to_lwes/2,
+                   lists:seq (1, NumContexts),
+                   Context),
+    context_to_lwes (NumContexts+1, { ?MD_HOST, Host })
+  ].
+
+context_to_lwes (ContextIndex, {ContextKey, ContextValue}) ->
+  [ { ?LWES_STRING,
+      context_name_key (ContextIndex),
+      stringify (ContextKey)
+    },
+    { ?LWES_STRING,
+      context_value_key (ContextIndex),
+      stringify (ContextValue)
+    }
+  ].
 
 -define(KILO, 1000).
 -define(MEGA, 1000000).
@@ -89,6 +138,11 @@ millis_to_next_round_minute (Ts) ->
   MillisSinceEpoch = now_to_epoch_millis (Ts),
   NextMinuteSinceEpochAsMillis - MillisSinceEpoch.
 
+binaryify (B) when is_binary (B) ->
+  B;
+binaryify (O) ->
+  list_to_binary (stringify (O)).
+
 stringify (I) when is_integer (I) ->
   integer_to_list (I);
 stringify (F) when is_float (F) ->
@@ -97,6 +151,49 @@ stringify (A) when is_atom (A) ->
   atom_to_list (A);
 stringify (L) ->
   L.
+
+integerify ("") -> undefined;
+integerify (<<>>) -> undefined;
+integerify (I) when is_integer (I) ->
+  I;
+integerify (F) when is_float (F) ->
+  trunc (F);
+integerify (B) when is_binary (B) ->
+  integerify (binary_to_list (B));
+integerify (L) when is_list (L) ->
+  try list_to_integer (L) of
+    I -> I
+  catch
+    _:_ -> undefined
+  end.
+
+floatify ("") -> undefined;
+floatify (<<>>) -> undefined;
+floatify (I) when is_integer (I) ->
+  I + 0.0;
+floatify (F) when is_float (F) ->
+  F;
+floatify (B) when is_binary (B) ->
+  floatify (binary_to_list (B));
+floatify (L) when is_list (L) ->
+  try list_to_float (L) of
+    F -> F
+  catch
+    _:_ ->
+      case integerify (L) of
+        undefined -> undefined;
+        I -> I + 0.0
+      end
+  end.
+
+find_in_dict (Key, Dict) ->
+  find_in_dict (Key, Dict, undefined).
+
+find_in_dict (Key, Dict, Default) ->
+  case dict:find (Key, Dict) of
+    error -> Default;
+    {ok, T} -> T
+  end.
 
 key_in_dict (Key, Dict) when is_list (Key) ->
   dict:is_key (Key, Dict)
@@ -108,35 +205,6 @@ key_in_list (Key, List) when is_list (Key), is_list (List) ->
    orelse proplists:is_defined (list_to_binary(Key), List)
    orelse proplists:is_defined (list_to_atom(Key), List).
 
-% generate lookup tables for lwes keys so save some time in production
--define (ELEMENT_OF_TUPLE_LIST(N,Prefix),
-         element (N,
-                  ct_expand:term (
-                    begin
-                      list_to_tuple (
-                        [
-                          list_to_binary (
-                            lists:concat ([Prefix, integer_to_list(E-1)])
-                          )
-                          || E <- lists:seq(1,1024)
-                        ]
-                      )
-                    end))).
-
-metric_name_key (N) ->
-  ?ELEMENT_OF_TUPLE_LIST (N, ?STATS_K).
-
-metric_value_key (N) ->
-  ?ELEMENT_OF_TUPLE_LIST (N, ?STATS_V).
-
-metric_type_key (N) ->
-  ?ELEMENT_OF_TUPLE_LIST (N, ?STATS_T).
-
-context_name_key (N) ->
-  ?ELEMENT_OF_TUPLE_LIST (N, ?CTXT_K).
-
-context_value_key (N) ->
-  ?ELEMENT_OF_TUPLE_LIST (N, ?CTXT_V).
 
 join (L,S) when is_list (L) ->
   lists:reverse (join (L, S, [])).
