@@ -225,15 +225,15 @@ metric_to_lwes (MetricIndex,
 metric_to_lwes (MetricIndex,
                 #md_metric { key = Name, type = Type, value = Value }) ->
   [ { ?LWES_STRING,
-      mondemand_util:metric_name_key (MetricIndex),
+      metric_name_key (MetricIndex),
       mondemand_util:stringify (Name)
     },
     { ?LWES_STRING,
-      mondemand_util:metric_type_key (MetricIndex),
+      metric_type_key (MetricIndex),
       type_to_string (Type)
     },
     { ?LWES_INT_64,
-      mondemand_util:metric_value_key (MetricIndex),
+      metric_value_key (MetricIndex),
       Value
     }
   ].

@@ -62,8 +62,12 @@
 -define (MD_TRACE_EVENT, <<"MonDemand::TraceMsg">>).
 
 % tokens in Mondemand::TraceMsg
--define (MD_TRACE_ID_KEY,       <<"mondemand.trace_id">>).
--define (MD_TRACE_OWNER_KEY,    <<"mondemand.owner">>).
+-define (MD_TRACE_ID_KEY_BIN, <<"mondemand.trace_id">>).
+-define (MD_TRACE_ID_KEY_LIST, "mondemand.trace_id").
+-define (MD_TRACE_ID_KEY_ATOM, 'mondemand.trace_id').
+-define (MD_TRACE_OWNER_KEY_BIN, <<"mondemand.owner">>).
+-define (MD_TRACE_OWNER_KEY_LIST, "mondemand.owner").
+-define (MD_TRACE_OWNER_KEY_ATOM, 'mondemand.owner').
 -define (MD_TRACE_PROG_ID_KEY,  <<"mondemand.prog_id">>).
 -define (MD_TRACE_SRC_HOST_KEY, <<"mondemand.src_host">>).
 -define (MD_TRACE_MESSAGE_KEY,  <<"mondemand.message">>).

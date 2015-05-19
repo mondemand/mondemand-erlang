@@ -138,26 +138,33 @@ all () ->
 stats () ->
   mondemand_statdb:all().
 
+trace_info_in_dict (Dict) ->
+  trace_owner_in_dict (Dict) andalso trace_id_in_dict (Dict).
+
+trace_id_in_dict (Dict) ->
+  dict:is_key (?MD_TRACE_ID_KEY_BIN, Dict)
+  orelse dict:is_key (?MD_TRACE_ID_KEY_LIST, Dict)
+  orelse dict:is_key (?MD_TRACE_ID_KEY_ATOM, Dict).
+
+trace_owner_in_dict (Dict) ->
+  dict:is_key (?MD_TRACE_OWNER_KEY_BIN, Dict)
+  orelse dict:is_key (?MD_TRACE_OWNER_KEY_LIST, Dict)
+  orelse dict:is_key (?MD_TRACE_OWNER_KEY_ATOM, Dict).
+
+trace_id_in_list (List) ->
+  proplists:is_defined (?MD_TRACE_ID_KEY_BIN, List)
+  orelse proplists:is_defined (?MD_TRACE_ID_KEY_LIST, List)
+  orelse proplists:is_defined (?MD_TRACE_ID_KEY_ATOM, List).
+
+trace_owner_in_list (List) ->
+  proplists:is_defined (?MD_TRACE_OWNER_KEY_BIN, List)
+  orelse proplists:is_defined (?MD_TRACE_OWNER_KEY_LIST, List)
+  orelse proplists:is_defined (?MD_TRACE_OWNER_KEY_ATOM, List).
+
 send_trace (ProgId, Message, Context) ->
   case Context of
-    Dict when is_tuple (Context) andalso element (1, Context) =:= dict ->
-      case mondemand_util:key_in_dict (?MD_TRACE_ID_KEY, Dict)
-        andalso mondemand_util:key_in_dict (?MD_TRACE_OWNER_KEY, Dict) of
-        true ->
-          send_event (
-            #lwes_event {
-              name = ?MD_TRACE_EVENT,
-              attrs = dict:store (?MD_TRACE_PROG_ID_KEY, ProgId,
-                        dict:store (?MD_TRACE_SRC_HOST_KEY, net_adm:localhost(),
-                          dict:store (?MD_TRACE_MESSAGE_KEY, Message,
-                                      Dict)))
-            });
-        false ->
-          {error, required_fields_not_set}
-      end;
     List when is_list (Context) ->
-      case mondemand_util:key_in_list (?MD_TRACE_ID_KEY, List)
-        andalso mondemand_util:key_in_list (?MD_TRACE_OWNER_KEY, List) of
+      case trace_id_in_list (List) andalso trace_owner_in_list (List) of
           true ->
             send_event (
               #lwes_event {
@@ -172,44 +179,53 @@ send_trace (ProgId, Message, Context) ->
           false ->
             {error, required_fields_not_set}
       end;
-    _ ->
-      {error, context_format_not_recognized}
+    Dict ->
+      case trace_info_in_dict (Dict) of
+        true ->
+          send_event (
+            #lwes_event {
+              name = ?MD_TRACE_EVENT,
+              attrs = dict:store (?MD_TRACE_PROG_ID_KEY, ProgId,
+                        dict:store (?MD_TRACE_SRC_HOST_KEY, net_adm:localhost(),
+                          dict:store (?MD_TRACE_MESSAGE_KEY, Message,
+                                      Dict)))
+            });
+        false -> {error, required_fields_not_set}
+      end
   end.
 
 send_trace (ProgId, Owner, TraceId, Message, Context) ->
   case Context of
-    Dict when is_tuple (Context) andalso element (1, Context) =:= dict ->
-      send_event (
-        #lwes_event {
-          name = ?MD_TRACE_EVENT,
-          attrs = dict:store (?MD_TRACE_PROG_ID_KEY, ProgId,
-                    dict:store (?MD_TRACE_OWNER_KEY, Owner,
-                      dict:store (?MD_TRACE_ID_KEY, TraceId,
-                        dict:store (?MD_TRACE_SRC_HOST_KEY, net_adm:localhost(),
-                          dict:store (?MD_TRACE_MESSAGE_KEY, Message,
-                                      Dict)))))
-        });
     List when is_list (Context) ->
       send_event (
         #lwes_event {
           name = ?MD_TRACE_EVENT,
           attrs = dict:from_list (
                     [ { ?MD_TRACE_PROG_ID_KEY, ProgId },
-                      { ?MD_TRACE_OWNER_KEY, Owner },
-                      { ?MD_TRACE_ID_KEY, TraceId },
+                      { ?MD_TRACE_OWNER_KEY_BIN, Owner },
+                      { ?MD_TRACE_ID_KEY_BIN, TraceId },
                       { ?MD_TRACE_SRC_HOST_KEY, net_adm:localhost() },
                       { ?MD_TRACE_MESSAGE_KEY, Message }
                       | List ]
                   )
         });
-    _ ->
-      {error, context_format_not_recognized}
+    Dict ->
+      send_event (
+        #lwes_event {
+          name = ?MD_TRACE_EVENT,
+          attrs = dict:store (?MD_TRACE_PROG_ID_KEY, ProgId,
+                    dict:store (?MD_TRACE_OWNER_KEY_BIN, Owner,
+                      dict:store (?MD_TRACE_ID_KEY_BIN, TraceId,
+                        dict:store (?MD_TRACE_SRC_HOST_KEY, net_adm:localhost(),
+                          dict:store (?MD_TRACE_MESSAGE_KEY, Message,
+                                      Dict)))))
+        })
   end.
 
 send_stats (ProgId, Context, Stats) ->
   Event =
-    mondemand_stats:to_lwes (
-      mondemand_stats:new (ProgId, Context, Stats)
+    mondemand_statsmsg:to_lwes (
+      mondemand_statsmsg:new (ProgId, Context, Stats)
     ),
   send_event (Event).
 
@@ -336,7 +352,7 @@ send_event (Event = #lwes_event {}) ->
   gen_server:cast (?MODULE, {send, lwes_event:to_binary (Event)}).
 
 flush_one (Stats) ->
-  send_event (mondemand_stats:to_lwes (Stats)).
+  send_event (mondemand_statsmsg:to_lwes (Stats)).
 
 parse_config (File) ->
   case file:read_file (File) of

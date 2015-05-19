@@ -27,8 +27,8 @@ to_lwes (#md_trace_msg { send_time = SendTimeIn,
     attrs = [ { ?LWES_INT_64, ?MD_SEND_TIME, SendTime },
               { ?LWES_STRING, ?MD_TRACE_PROG_ID_KEY, ProgId },
               { ?LWES_STRING, ?MD_TRACE_SRC_HOST_KEY, Host },
-              { ?LWES_STRING, ?MD_TRACE_OWNER_KEY, TraceOwner },
-              { ?LWES_STRING, ?MD_TRACE_ID_KEY, TraceId },
+              { ?LWES_STRING, ?MD_TRACE_OWNER_KEY_BIN, TraceOwner },
+              { ?LWES_STRING, ?MD_TRACE_ID_KEY_BIN, TraceId },
               { ?LWES_STRING, ?MD_TRACE_MESSAGE_KEY, TraceMessage }
               | lists:map (fun ({K, V}) ->
                             { ?LWES_STRING,
@@ -48,9 +48,9 @@ from_lwes (#lwes_event { attrs = Data}) ->
   ReceiptTime = dict:fetch (?MD_RECEIPT_TIME, Data),
   SendTime = mondemand_util:find_in_dict (?MD_SEND_TIME, Data),
   TraceId =
-    mondemand_util:find_in_dict (?MD_TRACE_ID_KEY, Data, <<"unknown">>),
+    mondemand_util:find_in_dict (?MD_TRACE_ID_KEY_BIN, Data, <<"unknown">>),
   TraceOwner =
-    mondemand_util:find_in_dict (?MD_TRACE_OWNER_KEY, Data, <<"unknown">>),
+    mondemand_util:find_in_dict (?MD_TRACE_OWNER_KEY_BIN, Data, <<"unknown">>),
   TraceMessage =
     mondemand_util:find_in_dict (?MD_TRACE_MESSAGE_KEY, Data, <<"unknown">>),
 

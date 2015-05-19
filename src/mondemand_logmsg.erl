@@ -40,12 +40,7 @@ to_lwes (#md_log_msg { send_time = SendTimeIn,
                 lists:zipwith (fun line_to_lwes/2,
                                lists:seq (1, NumLines),
                                Lines),
-                { ?LWES_U_INT_16, ?MD_CTXT_NUM, NumContexts + 1},
-                lists:zipwith (fun mondemand_util:context_to_lwes/2,
-                               lists:seq (1, NumContexts),
-                               Context),
-                mondemand_util:context_to_lwes (NumContexts+1,
-                                                { ?MD_HOST, Host })
+                mondemand_util:context_to_lwes (Host, NumContexts, Context)
               ]
             )
   }.

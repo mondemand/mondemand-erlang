@@ -11,8 +11,6 @@
 % util functions
 -export ([ find_in_dict/2,
            find_in_dict/3,
-           key_in_dict/2,
-           key_in_list/2,
            binaryify/1,
            stringify/1,
            integerify/1,
@@ -195,17 +193,6 @@ find_in_dict (Key, Dict, Default) ->
     {ok, T} -> T
   end.
 
-key_in_dict (Key, Dict) when is_list (Key) ->
-  dict:is_key (Key, Dict)
-    orelse dict:is_key (list_to_binary(Key), Dict)
-    orelse dict:is_key (list_to_atom(Key), Dict).
-
-key_in_list (Key, List) when is_list (Key), is_list (List) ->
-  proplists:is_defined (Key, List)
-   orelse proplists:is_defined (list_to_binary(Key), List)
-   orelse proplists:is_defined (list_to_atom(Key), List).
-
-
 join (L,S) when is_list (L) ->
   lists:reverse (join (L, S, [])).
 
@@ -224,7 +211,7 @@ listen (Config) ->
   {ok, L} = lwes:open (listener, Config),
   lwes:listen (L,
                fun (E, S) ->
-                 Stats = mondemand_stats:from_lwes (E),
+                 Stats = mondemand_statsmsg:from_lwes (E),
                  io:format ("~p~n",[Stats]),
                  S
                end,

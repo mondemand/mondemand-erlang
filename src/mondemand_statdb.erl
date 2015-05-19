@@ -525,7 +525,7 @@ map (Function, State,
 construct_stats_msg (AllKeys = [#mdkey {prog_id = ProgId, context = Context}|_],
                      {Host, Table}) ->
   Metrics = [ lookup_metric (I, Table) || I <- AllKeys ],
-  mondemand_stats:new (ProgId, Context, Metrics, Host).
+  mondemand_statsmsg:new (ProgId, Context, Metrics, Host).
 
 % this function looks up metrics from the different internal DB's and
 % unboxes them
@@ -595,7 +595,7 @@ all () ->
                                V]);
                  statset ->
                    [
-                     case mondemand_stats:get_statset (S, V) of
+                     case mondemand_statsmsg:get_statset (S, V) of
                        undefined -> ok;
                        SV ->
                          io:format ("~-58s ~-20b~n",
@@ -740,22 +740,22 @@ statset (Count, Sum, SamplesCount, ScaledCount, Sorted, Stats) ->
     lists:foldl (
       fun stats_to_statset/2,
       { Count, Sum, SamplesCount, ScaledCount, Sorted,
-        mondemand_stats:new_statset ()},
+        mondemand_statsmsg:new_statset ()},
       Stats),
   StatSet.
 
 stats_to_statset (count,
                   {Count, Sum, SamplesCount, ScaledCount, Sorted, StatSet}) ->
   { Count, Sum, SamplesCount, ScaledCount, Sorted,
-    mondemand_stats:set_statset (count, Count, StatSet)};
+    mondemand_statsmsg:set_statset (count, Count, StatSet)};
 stats_to_statset (sum,
                   {Count, Sum, SamplesCount, ScaledCount, Sorted, StatSet}) ->
   { Count, Sum, SamplesCount, ScaledCount, Sorted,
-    mondemand_stats:set_statset (sum, Sum, StatSet) };
+    mondemand_statsmsg:set_statset (sum, Sum, StatSet) };
 stats_to_statset (min,
                   {Count, Sum, SamplesCount, ScaledCount, Sorted, StatSet}) ->
   { Count, Sum, SamplesCount, ScaledCount, Sorted,
-    mondemand_stats:set_statset (
+    mondemand_statsmsg:set_statset (
       min,
       case ScaledCount > 0 of  % avoid badarg
         true -> element (1, Sorted);
@@ -765,7 +765,7 @@ stats_to_statset (min,
 stats_to_statset (max,
                   {Count, Sum, SamplesCount, ScaledCount, Sorted, StatSet}) ->
   { Count, Sum, SamplesCount, ScaledCount, Sorted,
-    mondemand_stats:set_statset (
+    mondemand_statsmsg:set_statset (
       max,
       case ScaledCount > 0 of  % avoid badarg
         true -> element (SamplesCount, Sorted);
@@ -775,7 +775,7 @@ stats_to_statset (max,
 stats_to_statset (avg,
                   {Count, Sum, SamplesCount, ScaledCount, Sorted, StatSet}) ->
   { Count, Sum, SamplesCount, ScaledCount, Sorted,
-    mondemand_stats:set_statset (
+    mondemand_statsmsg:set_statset (
       avg,
       case ScaledCount > 0 of  % avoid divide by zero
         true -> trunc (Sum / Count);
@@ -785,7 +785,7 @@ stats_to_statset (avg,
 stats_to_statset (median,
                   {Count, Sum, SamplesCount, ScaledCount, Sorted, StatSet}) ->
   { Count, Sum, SamplesCount, ScaledCount, Sorted,
-    mondemand_stats:set_statset (
+    mondemand_statsmsg:set_statset (
       median,
       case ScaledCount > 0 of  % avoid badarg
         true -> element (trunc (ScaledCount*0.50), Sorted);
@@ -795,7 +795,7 @@ stats_to_statset (median,
 stats_to_statset (pctl_75,
                   {Count, Sum, SamplesCount, ScaledCount, Sorted, StatSet}) ->
   { Count, Sum, SamplesCount, ScaledCount, Sorted,
-    mondemand_stats:set_statset (
+    mondemand_statsmsg:set_statset (
       pctl_75,
       case ScaledCount > 0 of  % avoid badarg
         true -> element (trunc (ScaledCount*0.75), Sorted);
@@ -805,7 +805,7 @@ stats_to_statset (pctl_75,
 stats_to_statset (pctl_90,
                   {Count, Sum, SamplesCount, ScaledCount, Sorted, StatSet}) ->
   { Count, Sum, SamplesCount, ScaledCount, Sorted,
-    mondemand_stats:set_statset (
+    mondemand_statsmsg:set_statset (
       pctl_90,
       case ScaledCount > 0 of  % avoid badarg
         true -> element (trunc (ScaledCount*0.90), Sorted);
@@ -815,7 +815,7 @@ stats_to_statset (pctl_90,
 stats_to_statset (pctl_95,
                   {Count, Sum, SamplesCount, ScaledCount, Sorted, StatSet}) ->
   { Count, Sum, SamplesCount, ScaledCount, Sorted,
-    mondemand_stats:set_statset (
+    mondemand_statsmsg:set_statset (
       pctl_95,
       case ScaledCount > 0 of  % avoid badarg
         true -> element (trunc (ScaledCount*0.95), Sorted);
@@ -825,7 +825,7 @@ stats_to_statset (pctl_95,
 stats_to_statset (pctl_98,
                   {Count, Sum, SamplesCount, ScaledCount, Sorted, StatSet}) ->
   { Count, Sum, SamplesCount, ScaledCount, Sorted,
-    mondemand_stats:set_statset (
+    mondemand_statsmsg:set_statset (
       pctl_98,
       case ScaledCount > 0 of  % avoid badarg
         true -> element (trunc (ScaledCount*0.98), Sorted);
@@ -835,7 +835,7 @@ stats_to_statset (pctl_98,
 stats_to_statset (pctl_99,
                   {Count, Sum, SamplesCount, ScaledCount, Sorted, StatSet}) ->
   { Count, Sum, SamplesCount, ScaledCount, Sorted,
-    mondemand_stats:set_statset (
+    mondemand_statsmsg:set_statset (
       pctl_99,
       case ScaledCount > 0 of  % avoid badarg
         true -> element (trunc (ScaledCount*0.99), Sorted);
@@ -991,10 +991,10 @@ config_perf_test_ () ->
       % check their values
       fun () ->
         SS = fetch_sample_set (my_prog1, my_metric1),
-        ?assertEqual (5, mondemand_stats:get_statset (count, SS)),
-        ?assertEqual (15, mondemand_stats:get_statset (sum, SS)),
-        ?assertEqual (1, mondemand_stats:get_statset (min, SS)),
-        ?assertEqual (5, mondemand_stats:get_statset (max, SS))
+        ?assertEqual (5, mondemand_statsmsg:get_statset (count, SS)),
+        ?assertEqual (15, mondemand_statsmsg:get_statset (sum, SS)),
+        ?assertEqual (1, mondemand_statsmsg:get_statset (min, SS)),
+        ?assertEqual (5, mondemand_statsmsg:get_statset (max, SS))
       end,
       % add a few more
       fun () ->
@@ -1005,15 +1005,15 @@ config_perf_test_ () ->
       end,
       fun () ->
         SS = fetch_sample_set (my_prog1, my_metric1),
-        ?assertEqual (20, mondemand_stats:get_statset (count, SS)),
+        ?assertEqual (20, mondemand_statsmsg:get_statset (count, SS)),
         ?assertEqual (lists:sum(lists:seq(1,20)),
-                      mondemand_stats:get_statset (sum, SS)),
+                      mondemand_statsmsg:get_statset (sum, SS)),
         % for min and max since we've been replacing the samples in the
         % reservoir we can't really assert much other than min will probably
         % not be 20 and max will probably not be 1
-        Min = mondemand_stats:get_statset (min, SS),
+        Min = mondemand_statsmsg:get_statset (min, SS),
         ?assertEqual (true, Min < 20),
-        Max = mondemand_stats:get_statset (max, SS),
+        Max = mondemand_statsmsg:get_statset (max, SS),
         ?assertEqual (true, Max > 1)
       end,
       ?_assertEqual (true, remove_sample_set (my_prog1, my_metric1))
