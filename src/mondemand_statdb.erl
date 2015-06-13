@@ -114,8 +114,6 @@
 -define (STATS_TABLE,  md_stats).
 -define (CONFIG_TABLE, md_config).
 
--define (DEFAULT_MAX_SAMPLE_SIZE, 10).
--define (DEFAULT_STATS, [min, max, sum, count]).
 -define (ALL_STATS, [min, max, sum, count, avg, median,
                      pctl_75, pctl_90, pctl_95, pctl_98, pctl_99]).
 
@@ -296,16 +294,20 @@ try_update_gauge (InternalKey =
 
 create_sample_set (ProgId, Key) ->
   create_sample_set (ProgId, Key, [], "",
-                     ?DEFAULT_MAX_SAMPLE_SIZE, ?DEFAULT_STATS).
+                     mondemand_config:default_max_sample_size(),
+                     mondemand_config:default_stats()).
 create_sample_set (ProgId, Key, Description) ->
   create_sample_set (ProgId, Key, [], Description,
-                     ?DEFAULT_MAX_SAMPLE_SIZE, ?DEFAULT_STATS).
+                     mondemand_config:default_max_sample_size(),
+                     mondemand_config:default_stats()).
 create_sample_set (ProgId, Key, Context, Description) ->
   create_sample_set (ProgId, Key, Context, Description,
-                     ?DEFAULT_MAX_SAMPLE_SIZE, ?DEFAULT_STATS).
+                     mondemand_config:default_max_sample_size(),
+                     mondemand_config:default_stats()).
 create_sample_set (ProgId, Key, Context, Description, Max) ->
   create_sample_set (ProgId, Key, Context, Description,
-                     Max, ?DEFAULT_STATS).
+                     Max,
+                     mondemand_config:default_stats()).
 create_sample_set (ProgId, Key, Context, Description, Max, Stats) ->
   InternalKey = calculate_key (ProgId, Context, statset, Key),
   create_sample_set_internal (InternalKey, Description, Max, Stats).
@@ -525,7 +527,14 @@ map (Function, State,
 construct_stats_msg (AllKeys = [#mdkey {prog_id = ProgId, context = Context}|_],
                      {Host, Table}) ->
   Metrics = [ lookup_metric (I, Table) || I <- AllKeys ],
-  mondemand_statsmsg:new (ProgId, Context, Metrics, Host).
+  mondemand_statsmsg:new (mondemand_util:binaryify (ProgId),
+                          mondemand_util:binaryify_context (Context),
+                          Metrics,
+                          case Host =/= undefined of
+                            true -> mondemand_util:binaryify (Host);
+                            false -> Host
+                          end,
+                          mondemand_util:millis_since_epoch()).
 
 % this function looks up metrics from the different internal DB's and
 % unboxes them
@@ -534,20 +543,26 @@ lookup_metric (InternalKey = #mdkey {type = Type, key = Key}, Table) ->
     I when I =:= counter; I =:= gauge ->
       case ets:lookup (?STATS_TABLE, InternalKey) of
         [] ->
-          #md_metric { key = Key, type = I, value = 0 };
+          #md_metric { key = mondemand_util:binaryify (Key),
+                       type = I,
+                       value = 0 };
         [#md_metric {value = V}] ->
-          #md_metric { key = Key, type = I, value = V }
+          #md_metric { key = mondemand_util:binaryify (Key),
+                       type = I,
+                       value = V }
       end;
     I when I =:= statset ->
       #config { statistics = Stats } = lookup_config (InternalKey),
       case ets:lookup (Table, InternalKey) of
         [] ->
           % special case, for filling out an empty statset
-          #md_metric { key = Key, type = I,
+          #md_metric { key = mondemand_util:binaryify (Key),
+                       type = I,
                        value = statset (0, 0, 0, 0, [], Stats)
                      };
         [Entry] ->
-          #md_metric { key = Key, type = I,
+          #md_metric { key = mondemand_util:binaryify (Key),
+                       type = I,
                        value = ets_to_statset (Entry, Stats)
                      }
       end
@@ -640,8 +655,10 @@ init([]) ->
   % make sure there's a default config
   ets:insert_new (?CONFIG_TABLE,
                   #config { key = '$default_config',
-                            max_sample_size = ?DEFAULT_MAX_SAMPLE_SIZE,
-                            statistics = ?DEFAULT_STATS }),
+                            max_sample_size =
+                               mondemand_config:default_max_sample_size(),
+                            statistics =
+                               mondemand_config:default_stats() }),
 
   % this table is for counters and gauges
   ets:new (?STATS_TABLE, [ set,
@@ -675,8 +692,8 @@ code_change (_OldVsn, State, _Extra) ->
 %-                        Internal Functions                           -
 %-=====================================================================-
 
-normalize_stats (undefined) -> ?DEFAULT_STATS;
-normalize_stats ("") -> ?DEFAULT_STATS;
+normalize_stats (undefined) -> mondemand_config:default_stats();
+normalize_stats ("") -> mondemand_config:default_stats();
 normalize_stats (L) when is_list (L) ->
   lists:flatten (lists:map (fun normalize/1, L)).
 

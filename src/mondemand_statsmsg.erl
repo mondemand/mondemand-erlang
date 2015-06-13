@@ -36,9 +36,11 @@
           get_statset/2,
           prog_id/1,
           host/1,
-          receipt_time/1,
+          timestamp/1,
           context/1,
-          context_val/2,
+          context_value/2,
+          add_contexts/2,
+          add_context/3,
           num_metrics/1,
           metrics/1,
           metric/1,
@@ -48,6 +50,7 @@
           to_lwes/1,
           from_lwes/1,
           statset_from_string/1,
+          statset_to_list/1,
           statset_to_string/1
         ]).
 
@@ -130,9 +133,6 @@ get_statset (pctl_99, S = #md_statset{}) -> S#md_statset.pctl_99.
 from_lwes (#lwes_event { attrs = Data}) ->
   % here's the name of the program which originated the metric
   ProgId = dict:fetch (?MD_PROG_ID, Data),
-  SenderIP = dict:fetch (?MD_SENDER_IP, Data),
-  SenderPort = dict:fetch (?MD_SENDER_PORT, Data),
-  ReceiptTime = dict:fetch (?MD_RECEIPT_TIME, Data),
   SendTime =
     case dict:find (?MD_SEND_TIME, Data) of
       error -> undefined;
@@ -143,9 +143,6 @@ from_lwes (#lwes_event { attrs = Data}) ->
 
   #md_stats_msg {
     send_time = SendTime,
-    receipt_time = ReceiptTime,
-    sender_ip = SenderIP,
-    sender_port = SenderPort,
     prog_id = ProgId,
     host = Host,
     num_context = NumContexts,
@@ -240,9 +237,11 @@ metric_to_lwes (MetricIndex,
 
 prog_id (#md_stats_msg { prog_id = ProgId }) -> ProgId.
 host (#md_stats_msg { host = Host }) -> Host.
-receipt_time (#md_stats_msg { receipt_time = ReceiptTime }) -> ReceiptTime.
+
+timestamp (#md_stats_msg { send_time = SendTime }) -> SendTime.
+
 context (#md_stats_msg { context = Context }) -> Context.
-context_val (#md_stats_msg { context = Context }, ContextKey) ->
+context_value (#md_stats_msg { context = Context }, ContextKey) ->
   context_find (ContextKey, Context, undefined).
 
 context_find (Key, Context, Default) ->
@@ -250,6 +249,18 @@ context_find (Key, Context, Default) ->
     false -> Default;
     {_, H} -> H
   end.
+
+add_contexts (S = #md_stats_msg { num_context = ContextNum,
+                                  context = Context},
+              L) when is_list (L) ->
+  S#md_stats_msg { num_context = ContextNum + length (L),
+                   context = L ++ Context }.
+
+add_context (S = #md_stats_msg { num_context = ContextNum,
+                                context = Context},
+             ContextKey, ContextValue) ->
+  S#md_stats_msg { num_context = ContextNum + 1,
+                   context = [ {ContextKey, ContextValue} | Context ] }.
 
 metrics (#md_stats_msg { metrics = Metrics }) -> Metrics.
 num_metrics (#md_stats_msg { num_metrics = NumMetrics }) -> NumMetrics.
@@ -282,6 +293,35 @@ statset_from_string (B) when is_binary(B) ->
     _ ->
       undefined
   end.
+
+statset_to_list (#md_statset {
+                   count = Count,
+                   sum = Sum,
+                   min = Min,
+                   max = Max,
+                   avg = Avg,
+                   median = Median,
+                   pctl_75 = Pctl75,
+                   pctl_90 = Pctl90,
+                   pctl_95 = Pctl95,
+                   pctl_98 = Pctl98,
+                   pctl_99 = Pctl99
+                 }) ->
+  add_if_defined (count, Count,
+    add_if_defined (sum, Sum,
+      add_if_defined (min, Min,
+        add_if_defined (max, Max,
+          add_if_defined (avg, Avg,
+            add_if_defined (median, Median,
+              add_if_defined (pctl_75, Pctl75,
+                add_if_defined (pctl_90, Pctl90,
+                  add_if_defined (pctl_95, Pctl95,
+                    add_if_defined (pctl_98, Pctl98,
+                      add_if_defined (pctl_99, Pctl99, [])
+                                   )))))))))).
+
+add_if_defined (_, undefined, A) -> A;
+add_if_defined (K, V, A) -> [{K,V}|A].
 
 statset_to_string (StatSet = #md_statset {}) ->
   % somewhat dense, but basically take the record, turn it into a list

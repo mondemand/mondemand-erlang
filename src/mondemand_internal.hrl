@@ -1,6 +1,8 @@
 -ifndef(_mondemand_internal_included).
 -define(_mondemand_internal_included, yup).
 
+-include("mondemand.hrl").
+
 % global defaults
 -define (MD_DEFAULT_SEND_INTERVAL, 60).
 
@@ -16,9 +18,6 @@
 -define (MD_NUM,           <<"num">>).
 -define (MD_HOST,          <<"host">>).
 
-% related to stats messages
--define (MD_STATS_EVENT, <<"MonDemand::StatsMsg">>).
-
 % tokens in Mondemand::StatsMsg
 -define (MD_STATS_K,             <<"k">>).
 -define (MD_STATS_V,             <<"v">>).
@@ -28,38 +27,6 @@
 % reset at the max and min values where appropriate
 -define (MD_STATS_MAX_METRIC_VALUE, 9223372036854775807).
 -define (MD_STATS_MIN_METRIC_VALUE, -9223372036854775808).
-
-% internal records for Mondemand::StatsMsg
--record (md_stats_msg, { send_time,
-                         receipt_time,
-                         sender_ip,
-                         sender_port,
-                         prog_id,
-                         host,
-                         num_context = 0,
-                         context = [],
-                         num_metrics = 0,
-                         metrics = []
-                       }).
--record (md_metric, { type,
-                      key,
-                      value
-                    }).
--record (md_statset, { count,
-                       sum,
-                       min,
-                       max,
-                       avg,
-                       median,
-                       pctl_75,
-                       pctl_90,
-                       pctl_95,
-                       pctl_98,
-                       pctl_99
-                     }).
-
-% related to trace messages
--define (MD_TRACE_EVENT, <<"MonDemand::TraceMsg">>).
 
 % tokens in Mondemand::TraceMsg
 -define (MD_TRACE_ID_KEY_BIN, <<"mondemand.trace_id">>).
@@ -71,22 +38,6 @@
 -define (MD_TRACE_PROG_ID_KEY,  <<"mondemand.prog_id">>).
 -define (MD_TRACE_SRC_HOST_KEY, <<"mondemand.src_host">>).
 -define (MD_TRACE_MESSAGE_KEY,  <<"mondemand.message">>).
-
-% record used internally for traced messages
--record (md_trace_msg, { send_time,
-                         receipt_time,
-                         sender_ip,
-                         sender_port,
-                         prog_id,
-                         host,
-                         trace_owner,
-                         trace_id,
-                         trace_message,
-                         trace_data = []
-                       }).
-
-% related to log messages
--define (MD_LOG_EVENT,   <<"MonDemand::LogMsg">>).
 
 % tokens in Mondemand::LogMsg
 -define (MD_LOG_NUM, <<"num">>).
@@ -106,24 +57,6 @@
 -define (MD_LOG_INFO_LEVEL, <<"info">>).
 -define (MD_LOG_DEBUG_LEVEL, <<"debug">>).
 -define (MD_LOG_ALL_LEVEL,  <<"all">>).
-
--record (md_log_msg, { send_time,
-                       receipt_time,
-                       sender_ip,
-                       sender_port,
-                       prog_id,
-                       host,
-                       num_context = 0,
-                       context = [],
-                       num_lines = 0,
-                       lines = []
-                     }).
--record (md_log_line, { file,
-                        line,
-                        priority,
-                        message,
-                        repeat_count
-                      }).
 
 -compile({parse_transform, ct_expand}).
 

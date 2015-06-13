@@ -12,6 +12,7 @@
 -export ([ find_in_dict/2,
            find_in_dict/3,
            binaryify/1,
+           binaryify_context/1,
            stringify/1,
            integerify/1,
            floatify/1,
@@ -36,7 +37,8 @@
          ]).
 
 %% Other functions
--export ([ listen/1,
+-export ([ normalize_ip/1,
+           listen/1,
            dummy/0 ]).
 
 context_from_lwes (Data) ->
@@ -141,6 +143,9 @@ binaryify (B) when is_binary (B) ->
 binaryify (O) ->
   list_to_binary (stringify (O)).
 
+binaryify_context (Context) ->
+  [ {binaryify (K), binaryify (V)} || {K,V} <- Context].
+
 stringify (I) when is_integer (I) ->
   integer_to_list (I);
 stringify (F) when is_float (F) ->
@@ -207,6 +212,15 @@ join ([H|T], S, []) ->
 join ([H|T], S, A) ->
   join (T,S,[H,S|A]).
 
+normalize_ip (undefined) -> undefined;
+normalize_ip (IP = {_,_,_,_}) ->
+  IP;
+normalize_ip (L) when is_list (L) ->
+  case inet_parse:address (L) of
+    {ok, IP} -> IP;
+    _ -> {0,0,0,0}
+  end.
+
 listen (Config) ->
   {ok, L} = lwes:open (listener, Config),
   lwes:listen (L,
@@ -219,8 +233,9 @@ listen (Config) ->
                ok).
 
 dummy () ->
+  N = random:uniform (100),
   [ mondemand:add_sample(foo,stuff,I)
-   || I <- lists:seq (1,20)
+   || I <- lists:seq (1,N)
   ],
   mondemand:increment(foo,bar),
   mondemand:set(foo,blah,50).
