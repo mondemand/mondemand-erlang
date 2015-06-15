@@ -62,7 +62,7 @@
 %   [ {Type, Key, #statset{} } ]
 % for statsets
 new (ProgId, Context, Metrics) ->
-  Host = net_adm:localhost (),
+  Host = mondemand_util:host (),
   new (ProgId, Context, Metrics, Host).
 new (ProgId, Context, Metrics = [{_,_,_}|_], Host) ->
   ValidatedMetrics = [ #md_metric { type = T, key = K, value = V }

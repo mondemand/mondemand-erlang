@@ -38,6 +38,7 @@
 
 %% Other functions
 -export ([ normalize_ip/1,
+           host/0,
            listen/1,
            dummy/0 ]).
 
@@ -220,6 +221,9 @@ normalize_ip (L) when is_list (L) ->
     {ok, IP} -> IP;
     _ -> {0,0,0,0}
   end.
+
+host () ->
+  net_adm:localhost().
 
 listen (Config) ->
   {ok, L} = lwes:open (listener, Config),

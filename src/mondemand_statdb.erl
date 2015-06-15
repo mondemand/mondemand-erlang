@@ -488,7 +488,7 @@ map_then (Function, Ago) ->
 map (Function, StatsSetTable) ->
   % there a couple of things we'd like to not recalculate but are probably
   % used over and over, so get them here and pass them through
-  Host = net_adm:localhost (),
+  Host = mondemand_util:host (),
 
   case ets:first (?CONFIG_TABLE) of
     '$end_of_table' -> [];
