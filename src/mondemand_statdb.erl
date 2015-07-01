@@ -527,12 +527,14 @@ map (Function, State,
 construct_stats_msg (AllKeys = [#mdkey {prog_id = ProgId, context = Context}|_],
                      {Host, Table}) ->
   Metrics = [ lookup_metric (I, Table) || I <- AllKeys ],
+  {FinalHost, FinalContext} =
+    mondemand_util:context_from_context (Host, Context),
   mondemand_statsmsg:new (mondemand_util:binaryify (ProgId),
-                          mondemand_util:binaryify_context (Context),
+                          mondemand_util:binaryify_context (FinalContext),
                           Metrics,
-                          case Host =/= undefined of
-                            true -> mondemand_util:binaryify (Host);
-                            false -> Host
+                          case FinalHost =/= undefined of
+                            true -> mondemand_util:binaryify (FinalHost);
+                            false -> FinalHost
                           end,
                           mondemand_util:millis_since_epoch()).
 

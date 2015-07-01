@@ -4,7 +4,9 @@
 -include_lib ("lwes/include/lwes.hrl").
 
 % lwes helper functions
--export ([ context_from_lwes/1,
+-export ([
+           context_from_context/2,
+           context_from_lwes/1,
            context_to_lwes/3
          ]).
 
@@ -42,6 +44,13 @@
            listen/1,
            dummy/0 ]).
 
+context_from_context (DefaultHost, Context) ->
+  case lists:keytake (?MD_HOST, 1, Context) of
+    false -> {DefaultHost, Context};
+    {value, {?MD_HOST, Host}, NewContext} -> {Host, NewContext}
+  end.
+
+
 context_from_lwes (Data) ->
   Num =
     case dict:find (?MD_CTXT_NUM, Data) of
@@ -69,13 +78,23 @@ context_value_key (N) ->
   ?ELEMENT_OF_TUPLE_LIST (N, ?MD_CTXT_V).
 
 context_to_lwes (Host, NumContexts, Context) ->
-  [
-    { ?LWES_U_INT_16, ?MD_CTXT_NUM, NumContexts + 1},
-    lists:zipwith (fun context_to_lwes/2,
-                   lists:seq (1, NumContexts),
-                   Context),
-    context_to_lwes (NumContexts+1, { ?MD_HOST, Host })
-  ].
+  case lists:keymember (?MD_HOST, 1, Context) of
+    false ->
+      [
+        { ?LWES_U_INT_16, ?MD_CTXT_NUM, NumContexts + 1},
+        lists:zipwith (fun context_to_lwes/2,
+                       lists:seq (1, NumContexts),
+                       Context),
+        context_to_lwes (NumContexts+1, { ?MD_HOST, Host })
+      ];
+    true ->
+      [
+        { ?LWES_U_INT_16, ?MD_CTXT_NUM, NumContexts},
+        lists:zipwith (fun context_to_lwes/2,
+                       lists:seq (1, NumContexts),
+                       Context)
+      ]
+  end.
 
 context_to_lwes (ContextIndex, {ContextKey, ContextValue}) ->
   [ { ?LWES_STRING,
