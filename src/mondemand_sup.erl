@@ -18,7 +18,32 @@ start_link() ->
 %-                        supervisor callbacks                         -
 %-=====================================================================-
 init([]) ->
-    ServiceChild =
+  VMStatsChild =
+    case application:get_env (mondemand, vmstats) of
+      {ok, true} ->
+        [
+          { mondemand_vmstats,
+           {mondemand_vmstats, start_link, []},
+           permanent,
+           2000,
+           worker,
+           [mondemand_vmstats]
+          }
+          ];
+      _ ->
+        []
+    end,
+
+  ServiceChildren =
+    VMStatsChild ++
+    [
+      { mondemand_statdb,
+        {mondemand_statdb, start_link, []},
+        permanent,
+        2000,
+        worker,
+        [mondemand_statdb]
+      },
       {
         mondemand,                           % child spec id
         {mondemand, start_link, []},         % child function to call {M,F,A}
@@ -26,8 +51,9 @@ init([]) ->
         2000,                                % time to wait for child shutdown
         worker,                              % type of child
         [mondemand]                          % modules used by child
-      },
-    {ok,{{one_for_one,5,60}, [ServiceChild]}}.
+      }
+    ],
+  {ok,{{one_for_one,5,60}, ServiceChildren}}.
 
 %-=====================================================================-
 %-                               Private                               -

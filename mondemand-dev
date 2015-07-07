@@ -5,7 +5,7 @@ for d in deps/* ; do
   deps="$deps -pa $d/ebin"
 done
 exec erl \
-  -name md_client -setcookie md_server \
+  -name md_client -setcookie md \
   $deps \
   -pa ebin \
   -config mondemand_dev.config \

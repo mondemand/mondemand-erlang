@@ -7,7 +7,7 @@ edoc:
 check:
 	@rm -rf .eunit
 	@mkdir -p .eunit
-	@dialyzer -Wno_opaque -Wno_return --src src
+	@dialyzer --src src
 	@rebar skip_deps=true eunit
 
 clean:
