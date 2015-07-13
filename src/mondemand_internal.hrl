@@ -12,6 +12,7 @@
 -define (MD_SENDER_PORT,   <<"SenderPort">>).
 -define (MD_PROG_ID,       <<"prog_id">>).
 -define (MD_SEND_TIME,     <<"send_time">>).
+-define (MD_COLLECT_TIME,  <<"collect_time">>).
 -define (MD_CTXT_NUM,      <<"ctxt_num">>).
 -define (MD_CTXT_K,        <<"ctxt_k">>).
 -define (MD_CTXT_V,        <<"ctxt_v">>).

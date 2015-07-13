@@ -36,7 +36,8 @@
           get_statset/2,
           prog_id/1,
           host/1,
-          timestamp/1,
+          collect_time/1,
+          send_time/1,
           context/1,
           context_value/2,
           add_contexts/2,
@@ -62,7 +63,7 @@
 %   [ {Type, Key, #statset{} } ]
 % for statsets
 new (ProgId, Context, Metrics) ->
-  Host = mondemand_util:host (),
+  Host = mondemand_config:host (),
   new (ProgId, Context, Metrics, Host).
 new (ProgId, Context, Metrics = [{_,_,_}|_], Host) ->
   ValidatedMetrics = [ #md_metric { type = T, key = K, value = V }
@@ -73,7 +74,7 @@ new (ProgId, Context, Metrics, Host) ->
   new (ProgId, Context, Metrics, Host, undefined).
 
 new (ProgId, Context, Metrics, Host, Timestamp) ->
-  #md_stats_msg { send_time = Timestamp,
+  #md_stats_msg { collect_time = Timestamp,
                   prog_id = ProgId,
                   host = Host,
                   num_context = length (Context),
@@ -112,7 +113,8 @@ get_statset (pctl_99, S = #md_statset{}) -> S#md_statset.pctl_99.
 % MonDemand::StatsMsg
 % {
 %   string prog_id;    # program identifier
-%   int64  send_time;  # time for stats in milliseconds since epoch
+%   int64  send_time;  # send time for stats in milliseconds since epoch
+%   int64  collect_time; # collect time for stats in milliseconds since epoch
 %   uint16 num;        # number of stats messages in this event
 %   string k0;         # name of the 0th counter
 %   string t0;         # type of the 0th counter
@@ -138,11 +140,17 @@ from_lwes (#lwes_event { attrs = Data}) ->
       error -> undefined;
       {ok, T} -> T
     end,
+  CollectTime =
+    case dict:find (?MD_COLLECT_TIME, Data) of
+      error -> undefined;
+      {ok, CT} -> CT
+    end,
   {Host, NumContexts, Context} = mondemand_util:context_from_lwes (Data),
   {NumMetrics, Metrics} = metrics_from_lwes (Data),
 
   #md_stats_msg {
     send_time = SendTime,
+    collect_time = CollectTime,
     prog_id = ProgId,
     host = Host,
     num_context = NumContexts,
@@ -179,6 +187,7 @@ to_lwes (L) when is_list (L) ->
   lists:map (fun to_lwes/1, L);
 
 to_lwes (#md_stats_msg { send_time = SendTimeIn,
+                         collect_time = CollectTimeIn,
                          prog_id = ProgId,
                          host = Host,
                          num_context = NumContexts,
@@ -186,16 +195,23 @@ to_lwes (#md_stats_msg { send_time = SendTimeIn,
                          num_metrics = NumMetrics,
                          metrics = Metrics
                        }) ->
+  NowMillis = mondemand_util:millis_since_epoch(),
   SendTime =
     case SendTimeIn of
-      undefined -> mondemand_util:millis_since_epoch();
+      undefined -> NowMillis;
       T -> T
+    end,
+  CollectTime =
+    case CollectTimeIn of
+      undefined -> NowMillis;
+      CT -> CT
     end,
   #lwes_event {
     name  = ?MD_STATS_EVENT,
     attrs = lists:flatten (
               [ { ?LWES_STRING, ?MD_PROG_ID, ProgId },
                 { ?LWES_INT_64, ?MD_SEND_TIME, SendTime },
+                { ?LWES_INT_64, ?MD_COLLECT_TIME, CollectTime },
                 { ?LWES_U_INT_16, ?MD_NUM, NumMetrics },
                 lists:zipwith (fun metric_to_lwes/2,
                                lists:seq (1, NumMetrics),
@@ -238,7 +254,8 @@ metric_to_lwes (MetricIndex,
 prog_id (#md_stats_msg { prog_id = ProgId }) -> ProgId.
 host (#md_stats_msg { host = Host }) -> Host.
 
-timestamp (#md_stats_msg { send_time = SendTime }) -> SendTime.
+collect_time (#md_stats_msg { collect_time = CollectTime }) -> CollectTime.
+send_time (#md_stats_msg { send_time = SendTime }) -> SendTime.
 
 context (#md_stats_msg { context = Context }) -> Context.
 context_value (#md_stats_msg { context = Context }, ContextKey) ->

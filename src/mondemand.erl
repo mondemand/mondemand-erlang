@@ -154,7 +154,7 @@ send_trace (ProgId, Message, Context) ->
               #lwes_event {
                 name = ?MD_TRACE_EVENT,
                 attrs = dict:from_list (
-                          [ {?MD_TRACE_SRC_HOST_KEY, mondemand_util:host() },
+                          [ {?MD_TRACE_SRC_HOST_KEY, mondemand_config:host() },
                             {?MD_TRACE_PROG_ID_KEY, ProgId},
                             {?MD_TRACE_MESSAGE_KEY, Message}
                             | List ]
@@ -170,7 +170,7 @@ send_trace (ProgId, Message, Context) ->
             #lwes_event {
               name = ?MD_TRACE_EVENT,
               attrs = dict:store (?MD_TRACE_PROG_ID_KEY, ProgId,
-                        dict:store (?MD_TRACE_SRC_HOST_KEY, mondemand_util:host(),
+                        dict:store (?MD_TRACE_SRC_HOST_KEY, mondemand_config:host(),
                           dict:store (?MD_TRACE_MESSAGE_KEY, Message,
                                       Dict)))
             });
@@ -188,7 +188,7 @@ send_trace (ProgId, Owner, TraceId, Message, Context) ->
                     [ { ?MD_TRACE_PROG_ID_KEY, ProgId },
                       { ?MD_TRACE_OWNER_KEY_BIN, Owner },
                       { ?MD_TRACE_ID_KEY_BIN, TraceId },
-                      { ?MD_TRACE_SRC_HOST_KEY, mondemand_util:host() },
+                      { ?MD_TRACE_SRC_HOST_KEY, mondemand_config:host() },
                       { ?MD_TRACE_MESSAGE_KEY, Message }
                       | List ]
                   )
@@ -200,7 +200,7 @@ send_trace (ProgId, Owner, TraceId, Message, Context) ->
           attrs = dict:store (?MD_TRACE_PROG_ID_KEY, ProgId,
                     dict:store (?MD_TRACE_OWNER_KEY_BIN, Owner,
                       dict:store (?MD_TRACE_ID_KEY_BIN, TraceId,
-                        dict:store (?MD_TRACE_SRC_HOST_KEY, mondemand_util:host(),
+                        dict:store (?MD_TRACE_SRC_HOST_KEY, mondemand_config:host(),
                           dict:store (?MD_TRACE_MESSAGE_KEY, Message,
                                       Dict)))))
         })

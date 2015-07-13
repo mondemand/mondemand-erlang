@@ -1,12 +1,28 @@
 -module (mondemand_config).
 
--export ([ default_max_sample_size/0,
+-export ([ init/0,
+           host/0,
+           default_max_sample_size/0,
            default_stats/0,
            lwes_config/0
          ]).
 
 -define (DEFAULT_MAX_SAMPLE_SIZE, 10).
 -define (DEFAULT_STATS, [min, max, sum, count]).
+-define (MOCHI_SENDER_HOST, mondemand_sender_host_global).
+
+% this function is meant to be called before the supervisor and
+% pulls all those configs which are mostly static.
+init () ->
+  Host =
+    case application:get_env (mondemand, sender_host) of
+      undefined -> net_adm:localhost();
+      {ok, H} -> H
+    end,
+  mondemand_global:put (?MOCHI_SENDER_HOST, Host).
+
+host () ->
+  mondemand_global:get (?MOCHI_SENDER_HOST).
 
 default_max_sample_size () ->
   case application:get_env (mondemand, default_max_sample_size) of
