@@ -4,11 +4,13 @@
            host/0,
            default_max_sample_size/0,
            default_stats/0,
-           lwes_config/0
+           lwes_config/0,
+           minutes_to_keep/0
          ]).
 
 -define (DEFAULT_MAX_SAMPLE_SIZE, 10).
 -define (DEFAULT_STATS, [min, max, sum, count]).
+-define (DEFAULT_MINUTES_TO_KEEP, 10).
 -define (MOCHI_SENDER_HOST, mondemand_sender_host_global).
 
 % this function is meant to be called before the supervisor and
@@ -97,6 +99,12 @@ parse_config (File) ->
       end;
     E ->
       E
+  end.
+
+minutes_to_keep () ->
+  case application:get_env (mondemand, minutes_to_keep) of
+    undefined -> ?DEFAULT_MINUTES_TO_KEEP;
+    {ok, I} when is_integer (I) -> I
   end.
 
 %%--------------------------------------------------------------------

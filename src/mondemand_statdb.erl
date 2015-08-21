@@ -91,7 +91,9 @@
           flush/2,
           config/0,
           all/0,
-          reset_stats/0
+          reset_stats/0,
+          minute_tab/1,
+          minutes_ago/2
         ]).
 
 %% gen_server callbacks
@@ -310,18 +312,19 @@ create_sample_set (ProgId, Key, Context, Description, Max) ->
                      mondemand_config:default_stats()).
 create_sample_set (ProgId, Key, Context, Description, Max, Stats) ->
   InternalKey = calculate_key (ProgId, Context, statset, Key),
-  create_sample_set_internal (InternalKey, Description, Max, Stats).
+  create_sample_set_internal (minute_tab (mondemand_util:current_minute()),
+                              InternalKey, Description, Max, Stats).
 
-create_sample_set_internal (InternalKey = #mdkey{}) ->
+create_sample_set_internal (Table, InternalKey = #mdkey{}) ->
   #config { max_sample_size = Max, statistics = Stats } =
     lookup_config (InternalKey),
-  create_sample_set_internal (InternalKey, "", Max, Stats).
+  create_sample_set_internal (Table, InternalKey, "", Max, Stats).
 
-create_sample_set_internal (InternalKey, Description, Max, Stats) ->
+create_sample_set_internal (Table, InternalKey, Description, Max, Stats) ->
   add_new_config (InternalKey, Description, Max, Stats),
   % Creates a new entry of the form
   % { Key, Count, Sum, Sample1 ... SampleMax }
-  case ets:insert_new (minute_tab (mondemand_util:current_minute()),
+  case ets:insert_new (Table,
                         list_to_tuple (
                           [ InternalKey, Max, 0, 0
                             | [ 0 || _ <- lists:seq (1, Max) ]
@@ -347,7 +350,7 @@ try_update_sampleset (Table, InternalKey, Value) ->
     error:badarg ->
       % catch the failure, create the entry, then try the update again,
       % if it crashes a second time we'll just let it go
-      create_sample_set_internal (InternalKey),
+      create_sample_set_internal (Table, InternalKey),
       [M, UC,_] = update_sampleset (Table, InternalKey, Value),
       [M, UC]
   end.
@@ -726,12 +729,19 @@ minutes_ago (MinuteNow, Ago) ->
   end.
 
 flush (MinutesAgo, Function) ->
+  CurrentMinute = mondemand_util:current_minute(),
   CurrentMinuteMillis = mondemand_util:current(),
   PreviousMinuteMillis = CurrentMinuteMillis - 60000 * MinutesAgo,
-  PreviousMinute = minutes_ago (mondemand_util:current_minute(), MinutesAgo),
+  PreviousMinute = minutes_ago (CurrentMinute, MinutesAgo),
   StatsSetTable = minute_tab (PreviousMinute),
+  error_logger:info_msg ("Start flushing ~p",[StatsSetTable]),
   map (Function, PreviousMinuteMillis, StatsSetTable),
-  ets:delete_all_objects (StatsSetTable).
+  error_logger:info_msg ("Finish flushing ~p",[StatsSetTable]),
+  MinuteToDelete =
+    minute_tab (minutes_ago (CurrentMinute,
+                             mondemand_config:minutes_to_keep())),
+  error_logger:info_msg ("Deleting ~p (~p)",[StatsSetTable, MinuteToDelete]),
+  ets:delete_all_objects (MinuteToDelete).
 
 ets_to_statset (Data, Stats) ->
   % this needs to match the create side

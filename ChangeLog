@@ -1,3 +1,6 @@
+Version 5.3.0 (molinaro)
+  * allow more than one previous minute to be kept
+
 Version 5.2.0 (molinaro)
   * allow host sent in events to be overriden by an application env variable
   and stored in a global (copied mochiglobal into the mondemand application).
