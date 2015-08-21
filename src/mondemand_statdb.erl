@@ -86,12 +86,14 @@
 
           map_now/1,
           map_then/2,
-          map/2,
+          map/3,
 
           flush/2,
           config/0,
           all/0,
-          reset_stats/0
+          reset_stats/0,
+          minute_tab/1,
+          minutes_ago/2
         ]).
 
 %% gen_server callbacks
@@ -310,18 +312,19 @@ create_sample_set (ProgId, Key, Context, Description, Max) ->
                      mondemand_config:default_stats()).
 create_sample_set (ProgId, Key, Context, Description, Max, Stats) ->
   InternalKey = calculate_key (ProgId, Context, statset, Key),
-  create_sample_set_internal (InternalKey, Description, Max, Stats).
+  create_sample_set_internal (minute_tab (mondemand_util:current_minute()),
+                              InternalKey, Description, Max, Stats).
 
-create_sample_set_internal (InternalKey = #mdkey{}) ->
+create_sample_set_internal (Table, InternalKey = #mdkey{}) ->
   #config { max_sample_size = Max, statistics = Stats } =
     lookup_config (InternalKey),
-  create_sample_set_internal (InternalKey, "", Max, Stats).
+  create_sample_set_internal (Table, InternalKey, "", Max, Stats).
 
-create_sample_set_internal (InternalKey, Description, Max, Stats) ->
+create_sample_set_internal (Table, InternalKey, Description, Max, Stats) ->
   add_new_config (InternalKey, Description, Max, Stats),
   % Creates a new entry of the form
   % { Key, Count, Sum, Sample1 ... SampleMax }
-  case ets:insert_new (minute_tab (mondemand_util:current_minute()),
+  case ets:insert_new (Table,
                         list_to_tuple (
                           [ InternalKey, Max, 0, 0
                             | [ 0 || _ <- lists:seq (1, Max) ]
@@ -347,7 +350,7 @@ try_update_sampleset (Table, InternalKey, Value) ->
     error:badarg ->
       % catch the failure, create the entry, then try the update again,
       % if it crashes a second time we'll just let it go
-      create_sample_set_internal (InternalKey),
+      create_sample_set_internal (Table, InternalKey),
       [M, UC,_] = update_sampleset (Table, InternalKey, Value),
       [M, UC]
   end.
@@ -470,13 +473,16 @@ config () ->
              ?CONFIG_TABLE).
 
 map_now (Function) ->
+  CurrentMinuteMillis = mondemand_util:current(),
   StatsSetTable = minute_tab (mondemand_util:current_minute()),
-  map (Function, StatsSetTable).
+  map (Function, CurrentMinuteMillis, StatsSetTable).
 
 map_then (Function, Ago) ->
+  CurrentMinuteMillis = mondemand_util:current(),
+  PreviousMinuteMillis = CurrentMinuteMillis - 60000 * Ago,
   PreviousMinute = minutes_ago (mondemand_util:current_minute(), Ago),
   StatsSetTable = minute_tab (PreviousMinute),
-  map (Function, StatsSetTable).
+  map (Function, PreviousMinuteMillis, StatsSetTable).
 
 % I want to iterate over the config table, collapsing all metrics for a
 % particular program id and context into a group so they can all be processed
@@ -485,26 +491,26 @@ map_then (Function, Ago) ->
 % I want to use ets:first/1 and ets:next/2 so I can eventually set some rules
 % about how they are processed in terms of time spent overall
 %
-map (Function, StatsSetTable) ->
+map (Function, CollectTime, StatsSetTable) ->
   % there a couple of things we'd like to not recalculate but are probably
   % used over and over, so get them here and pass them through
-  Host = mondemand_util:host (),
+  Host = mondemand_config:host (),
 
   case ets:first (?CONFIG_TABLE) of
     '$end_of_table' -> [];
     FirstKey ->
       % put the first into the current list to collapse
-      map (Function, {Host, StatsSetTable}, [FirstKey])
+      map1 (Function, {Host, CollectTime, StatsSetTable}, [FirstKey])
   end.
 
 % need to skip the config as that's not what we want to map over
-map (Function, State, [Key = '$default_config']) ->
+map1 (Function, State, [Key = '$default_config']) ->
   case ets:next (?CONFIG_TABLE, Key) of
     '$end_of_table' -> [];
     NextKey ->
-      map (Function, State, [NextKey])
+      map1 (Function, State, [NextKey])
   end;
-map (Function, State,
+map1 (Function, State,
      % match out the ProgId and Context from the current collapsed list
      AllKeys = [LastKey = #mdkey {prog_id = ProgId, context = Context}|_]) ->
 
@@ -516,16 +522,16 @@ map (Function, State,
     Key = #mdkey {prog_id = ProgId, context = Context} ->
       % this particular entry has the same ProgId and Context, so add it
       % to the list of keys which are grouped together
-      map (Function, State, [Key|AllKeys]);
+      map1 (Function, State, [Key|AllKeys]);
     NonMatchingKey ->
       % the key didn't match, so call the function with the current set
       Function (construct_stats_msg (AllKeys, State)),
       % then use this key for the next iteration
-      map (Function, State, [NonMatchingKey])
+      map1 (Function, State, [NonMatchingKey])
   end.
 
 construct_stats_msg (AllKeys = [#mdkey {prog_id = ProgId, context = Context}|_],
-                     {Host, Table}) ->
+                     {Host, CollectTime, Table}) ->
   Metrics = [ lookup_metric (I, Table) || I <- AllKeys ],
   {FinalHost, FinalContext} =
     mondemand_util:context_from_context (Host, Context),
@@ -536,7 +542,7 @@ construct_stats_msg (AllKeys = [#mdkey {prog_id = ProgId, context = Context}|_],
                             true -> mondemand_util:binaryify (FinalHost);
                             false -> FinalHost
                           end,
-                          mondemand_util:millis_since_epoch()).
+                          CollectTime).
 
 % this function looks up metrics from the different internal DB's and
 % unboxes them
@@ -723,10 +729,19 @@ minutes_ago (MinuteNow, Ago) ->
   end.
 
 flush (MinutesAgo, Function) ->
-  PreviousMinute = minutes_ago (mondemand_util:current_minute(), MinutesAgo),
+  CurrentMinute = mondemand_util:current_minute(),
+  CurrentMinuteMillis = mondemand_util:current(),
+  PreviousMinuteMillis = CurrentMinuteMillis - 60000 * MinutesAgo,
+  PreviousMinute = minutes_ago (CurrentMinute, MinutesAgo),
   StatsSetTable = minute_tab (PreviousMinute),
-  map (Function, StatsSetTable),
-  ets:delete_all_objects (StatsSetTable).
+  error_logger:info_msg ("Start flushing ~p",[StatsSetTable]),
+  map (Function, PreviousMinuteMillis, StatsSetTable),
+  error_logger:info_msg ("Finish flushing ~p",[StatsSetTable]),
+  MinuteToDelete =
+    minute_tab (minutes_ago (CurrentMinute,
+                             mondemand_config:minutes_to_keep())),
+  error_logger:info_msg ("Deleting ~p (~p)",[StatsSetTable, MinuteToDelete]),
+  ets:delete_all_objects (MinuteToDelete).
 
 ets_to_statset (Data, Stats) ->
   % this needs to match the create side

@@ -3,6 +3,8 @@
 -include ("mondemand_internal.hrl").
 -include_lib ("lwes/include/lwes.hrl").
 
+-compile ([{parse_transform,ct_expand}]).
+
 % lwes helper functions
 -export ([
            context_from_context/2,
@@ -31,6 +33,7 @@
           now_to_epoch_millis/1,        % ({_,_,_}) -> MillisSinceEpoch
           now_to_epoch_secs/1,          % ({_,_,_}) -> SecondsSinceEpoch
           now_to_epoch_minutes/1,       % ({_,_,_}) -> MinutesSinceEpoch
+          current/0,
           current_minute/0,
           millis_to_next_round_second/0,
           millis_to_next_round_second/1,
@@ -40,7 +43,6 @@
 
 %% Other functions
 -export ([ normalize_ip/1,
-           host/0,
            listen/1,
            dummy/0 ]).
 
@@ -138,6 +140,17 @@ now_to_epoch_secs ({Mega, Secs, _}) ->
   Mega * ?MEGA + Secs.
 now_to_epoch_minutes (Now) ->
   trunc (now_to_epoch_secs (Now) / 60).
+
+current () ->
+  {{Year, Month, Day},{Hour,Minute,_}} = now_to_mdyhms (os:timestamp()),
+  EpochStartSeconds =
+    ct_expand:term (
+      calendar:datetime_to_gregorian_seconds({{1970,1,1},{0,0,0}})
+    ),
+  NowSeconds =
+    calendar:datetime_to_gregorian_seconds (
+      {{Year, Month, Day},{Hour, Minute, 0}}),
+  (NowSeconds - EpochStartSeconds) * 1000.
 
 current_minute () ->
   {_, Minute, _} = time (),
@@ -240,9 +253,6 @@ normalize_ip (L) when is_list (L) ->
     {ok, IP} -> IP;
     _ -> {0,0,0,0}
   end.
-
-host () ->
-  net_adm:localhost().
 
 listen (Config) ->
   {ok, L} = lwes:open (listener, Config),

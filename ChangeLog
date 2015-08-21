@@ -1,3 +1,11 @@
+Version 5.3.0 (molinaro)
+  * allow more than one previous minute to be kept
+
+Version 5.2.0 (molinaro)
+  * allow host sent in events to be overriden by an application env variable
+  and stored in a global (copied mochiglobal into the mondemand application).
+  * added collect_time which is the time that statsets were collected.
+
 Version 5.1.0 (molinaro)
   * added interface for gauges
   * cap counters to max signed int64 as that's what lwes is doing

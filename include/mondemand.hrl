@@ -15,6 +15,7 @@
 
 % internal records for Mondemand::StatsMsg
 -record (md_stats_msg, { send_time,
+                         collect_time,
                          prog_id,
                          host,
                          num_context = 0,

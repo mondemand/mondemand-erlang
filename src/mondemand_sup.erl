@@ -18,6 +18,9 @@ start_link() ->
 %-                        supervisor callbacks                         -
 %-=====================================================================-
 init([]) ->
+  % initialize config
+  mondemand_config:init(),
+
   VMStatsChild =
     case application:get_env (mondemand, vmstats) of
       {ok, true} ->
