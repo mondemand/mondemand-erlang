@@ -285,7 +285,7 @@ handle_call (get_state, _From, State) ->
 % restart with currently assigned config
 handle_call (restart, _From,
              State = #state { config = Config, channel = OldChannel }) ->
-  case lwes:open (emitter, Config) of
+  case lwes:open (emitters, Config) of
     {ok, NewChannel} ->
       lwes:close (OldChannel),
       {reply, ok, State#state {channel = NewChannel}};
