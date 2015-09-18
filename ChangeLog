@@ -1,3 +1,6 @@
+Version 5.3.1 (molinaro)
+  * typo in restart code meant hot-restarts were failing with bad_ip_port
+
 Version 5.3.0 (molinaro)
   * allow more than one previous minute to be kept
 
