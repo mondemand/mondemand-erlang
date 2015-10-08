@@ -36,7 +36,7 @@ ensure_started(App) ->
     {error, {already_started, App}} ->
       ok;
     Other ->
-      error_logger:info_msg ("got ~p in ensure_started (~p)",[Other, App]),
+      error_logger:error_msg ("got ~p in ensure_started (~p)",[Other, App]),
       erlang:error (failed_to_start)
   end.
 

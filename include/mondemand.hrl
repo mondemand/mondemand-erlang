@@ -9,11 +9,17 @@
                      name,
                      msg
                    }).
+% related to perf messages
+-define (MD_PERF_EVENT, <<"MonDemand::PerfMsg">>).
+
+% internal record for MonDemand::PerfMsg
+-record (md_perf_msg, { id, timings = [] }).
+-record (md_perf_timing, { label, start_time, end_time }).
 
 % related to stats messages
 -define (MD_STATS_EVENT, <<"MonDemand::StatsMsg">>).
 
-% internal records for Mondemand::StatsMsg
+% internal records for MonDemand::StatsMsg
 -record (md_stats_msg, { send_time,
                          collect_time,
                          prog_id,

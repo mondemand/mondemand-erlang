@@ -734,13 +734,10 @@ flush (MinutesAgo, Function) ->
   PreviousMinuteMillis = CurrentMinuteMillis - 60000 * MinutesAgo,
   PreviousMinute = minutes_ago (CurrentMinute, MinutesAgo),
   StatsSetTable = minute_tab (PreviousMinute),
-  error_logger:info_msg ("Start flushing ~p",[StatsSetTable]),
   map (Function, PreviousMinuteMillis, StatsSetTable),
-  error_logger:info_msg ("Finish flushing ~p",[StatsSetTable]),
   MinuteToDelete =
     minute_tab (minutes_ago (CurrentMinute,
                              mondemand_config:minutes_to_keep())),
-  error_logger:info_msg ("Deleting ~p (~p)",[StatsSetTable, MinuteToDelete]),
   ets:delete_all_objects (MinuteToDelete).
 
 ets_to_statset (Data, Stats) ->

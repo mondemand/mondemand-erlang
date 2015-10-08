@@ -65,7 +65,13 @@ to_udp (#md_event { sender_port = SenderPort,
                       mondemand_util:normalize_ip (SenderIP),
                       SenderPort,
                       lwes_event:to_binary (mondemand_logmsg:to_lwes (Msg))
-                     }
+                     };
+    ?MD_PERF_EVENT -> {udp,
+                       ok,
+                       mondemand_util:normalize_ip (SenderIP),
+                       SenderPort,
+                       lwes_event:to_binary (mondemand_perfmsg:to_lwes (Msg))
+                      }
   end.
 
 from_udp (Event = #md_event {}) ->
@@ -91,7 +97,8 @@ from_udp (Packet = {udp, _, SenderIp, SenderPort, _}) ->
       Msg =
         case Name of
           ?MD_STATS_EVENT -> mondemand_statsmsg:from_lwes (Event);
-          ?MD_LOG_EVENT -> mondemand_logmsg:from_lwes (Event)
+          ?MD_LOG_EVENT -> mondemand_logmsg:from_lwes (Event);
+          ?MD_PERF_EVENT -> mondemand_perfmsg:from_lwes (Event)
         end,
       #md_event { sender_ip = SenderIp,
                   sender_port = SenderPort,
@@ -104,11 +111,13 @@ to_lwes (#md_event { name = Name, msg = Msg }) ->
   case Name of
     ?MD_TRACE_EVENT -> ok;
     ?MD_STATS_EVENT -> mondemand_statsmsg:to_lwes (Msg);
-    ?MD_LOG_EVENT -> mondemand_logmsg:to_lwes (Msg)
+    ?MD_LOG_EVENT -> mondemand_logmsg:to_lwes (Msg);
+    ?MD_PERF_EVENT -> mondemand_perfmsg:to_lwes (Msg)
   end.
 
 name_to_type (?MD_STATS_EVENT) -> stats_msg;
 name_to_type (?MD_LOG_EVENT) -> log_msg;
 name_to_type (?MD_TRACE_EVENT) -> trace_msg;
+name_to_type (?MD_PERF_EVENT) -> perf_msg;
 name_to_type (_) -> undefined.
 

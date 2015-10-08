@@ -57,49 +57,142 @@ lwes_config () ->
   end.
 
 parse_config (File) ->
-  case file:read_file (File) of
-    {ok, Bin} ->
-      HostOrHosts =
-        case re:run (Bin, "MONDEMAND_ADDR=\"([^\"]+)\"",
-                     [{capture, all_but_first, list}]) of
-          nomatch -> [];
-          {match, [H]} -> H
-        end,
-      Port =
-        case re:run (Bin, "MONDEMAND_PORT=\"([^\"]+)\"",
-                     [{capture, all_but_first, list}]) of
-          nomatch -> undefined;
-          {match, [P]} -> list_to_integer(P)
-        end,
-      TTL =
-        case re:run (Bin, "MONDEMAND_TTL=\"([^\"]+)\"",
-                          [{capture, all_but_first, list}]) of
-          nomatch -> undefined;
-          {match, [T]} -> list_to_integer(T)
-        end,
-
-      case Port of
-        undefined -> {error, no_port_in_config_file};
-        _ ->
-          Split = re:split(HostOrHosts,",",[{return, list}]),
-          case Split of
-            [] -> {error, config_file_issue};
-            [Host] ->
-              case TTL of
-                undefined -> {1, [ {Host, Port} ]};
-                _ -> {1, [ {Host, Port, TTL} ] }
-              end;
-            L when is_list (L) ->
-              % allow emitting the same thing to multiple addresses
-              case TTL of
-                undefined -> { length (L), [ {H, Port} || H <- L ] };
-                _ -> { length (L), [ {H, Port, TTL} || H <- L ] }
-              end
-          end
-      end;
-    E ->
-      E
+  case read_file (File) of
+    {error, E} -> {error, E};
+    Bin ->
+      case parse_star_config (Bin) of
+        {error, E } -> {error, E};
+        Config ->
+          lists:foldl (
+            fun (T,A) ->
+                [ {T, case parse_type_config (Bin, T) of
+                        {error, _} -> Config;
+                        C -> C
+                      end } | A ]
+            end,
+            [],
+            [ stats, perf, log, trace])
+      end
   end.
+
+parse_star_config (File) ->
+  parse_prefix_config ("MONDEMAND_", File).
+
+parse_type_config (File, perf) ->
+  parse_prefix_config ("MONDEMAND_PERF_", File);
+parse_type_config (File, stats) ->
+  parse_prefix_config ("MONDEMAND_STATS_", File);
+parse_type_config (File, log) ->
+  parse_prefix_config ("MONDEMAND_LOG_", File);
+parse_type_config (File, trace) ->
+  parse_prefix_config ("MONDEMAND_TRACE_", File).
+
+parse_value (Prefix, Suffix, Line) ->
+  parse_value (Prefix, Suffix, Line, undefined).
+
+parse_value (Prefix, Suffix, Line, Default) ->
+  case re:run (Line, Prefix ++ Suffix ++ "=\"([^\"]+)\"",
+               [{capture, all_but_first, list}]) of
+    nomatch -> Default;
+    {match, [H]} ->
+      case string:tokens (H, " ,") of
+        [] -> error;
+        H1 -> H1
+      end
+  end.
+
+coerce (undefined, _) -> undefined;
+coerce (L, T) when is_list(L) ->
+  [ case T of
+      list -> E;
+      integer -> list_to_integer (E)
+    end || E <- L
+  ];
+coerce (I, integer) ->
+  list_to_integer (I).
+
+single (undefined) -> undefined;
+single ([H]) -> H.
+
+read_file (File) ->
+  case file:read_file (File) of
+    {ok, Bin} -> Bin;
+    E -> E
+  end.
+
+parse_prefix_config (Prefix, Bin) ->
+  HostOrHosts = parse_value (Prefix, "ADDR", Bin),
+  PortOrPorts = coerce (parse_value (Prefix, "PORT", Bin), integer),
+  TTLOrTTLs = coerce (parse_value (Prefix, "TTL", Bin), integer),
+  MaybeSendTo =
+    single (coerce (parse_value (Prefix, "SENDTO", Bin), integer)),
+  case is_list (HostOrHosts)
+       andalso is_list (PortOrPorts)
+       andalso (TTLOrTTLs =:= undefined orelse is_list (TTLOrTTLs))
+       andalso (MaybeSendTo =:= undefined orelse is_integer (MaybeSendTo))
+  of
+    false -> {error, bad_config};
+    true ->
+      NumHosts = length (HostOrHosts),
+      NumPorts = length (PortOrPorts),
+      NumTTLs = case TTLOrTTLs =:= undefined of
+                  true -> 0;
+                  false -> length (TTLOrTTLs)
+                end,
+      SendTo =
+        case MaybeSendTo =:= undefined of
+          true -> NumHosts;
+          false -> MaybeSendTo
+        end,
+      % valid configs are 1 host, 1 port, 0 or 1 ttl
+      % or a list of hosts, 1 port, 0 or 1 ttl, sendto 1
+      % or a list of hosts,
+      %    a list of ports (of the same size),
+      %    0 or 1 ttl, sendto less than or equal to number of hosts
+      % or a list of hosts, a list of ports (of the same size),
+      %    and a list of ttls of the same size,
+      %    and sendto less than or equal to number of hosts
+      case (NumHosts =:= 1
+            andalso NumPorts =:= 1
+            andalso (NumTTLs =:= 0
+                     orelse NumTTLs =:= 1)
+            andalso SendTo =:= 1)
+        orelse
+           (NumHosts > 1
+            andalso NumPorts =:= 1
+            andalso (NumTTLs =:= 0
+                     orelse NumTTLs =:= 1
+                     orelse NumTTLs =:= NumHosts)
+            andalso SendTo =< NumHosts)
+        orelse
+           (NumHosts =:= NumPorts
+            andalso (NumTTLs =:= 0
+                     orelse NumTTLs =:= 1
+                     orelse NumTTLs =:= NumHosts)
+            andalso SendTo =< NumHosts)
+      of
+        false -> {error, config_mismatch};
+        true ->
+          {SendTo, build (HostOrHosts, PortOrPorts, TTLOrTTLs)}
+      end
+  end.
+
+build (Hosts, Ports, TTLs) ->
+  build (Hosts, Ports, TTLs, []).
+build ([],_,_,A) ->
+  lists:reverse (A);
+build ([Host|RestHosts], [Port], undefined, A) ->
+  build (RestHosts, [Port], undefined, [ {Host, Port} | A ]);
+build ([Host|RestHosts], [Port], [TTL], A) ->
+  build (RestHosts, [Port], [TTL], [ {Host, Port, TTL} | A ]);
+build ([Host|RestHosts], [Port], [TTL|RestTTLs], A) ->
+  build (RestHosts, [Port], RestTTLs, [ {Host, Port, TTL} | A ]);
+build ([Host|RestHosts], [Port|RestPorts], undefined, A) ->
+  build (RestHosts, RestPorts, undefined, [ {Host, Port} | A ]);
+build ([Host|RestHosts], [Port|RestPorts], [TTL], A) ->
+  build (RestHosts, RestPorts, [TTL], [ {Host, Port, TTL} | A ]);
+build ([Host|RestHosts], [Port|RestPorts], [TTL|RestTTLs], A) ->
+  build (RestHosts, RestPorts, RestTTLs, [ {Host, Port, TTL} | A ]).
 
 minutes_to_keep () ->
   case application:get_env (mondemand, minutes_to_keep) of
@@ -136,10 +229,18 @@ config_file_test_ () ->
       % delete any files from failed tests
       fun () -> DeleteConfig () end,
       fun () -> ok = WriteConfig ("localhost", 20602, undefined) end,
-      ?_assertEqual ({1, [{"localhost",20602}]}, parse_config (ConfigFile)),
+      ?_assertEqual ([{trace,{1,[{"localhost",20602}]}},
+                      {log,{1,[{"localhost",20602}]}},
+                      {perf,{1,[{"localhost",20602}]}},
+                      {stats,{1,[{"localhost",20602}]}}],
+                     parse_config (ConfigFile)),
       fun () -> ok = DeleteConfig () end,
       fun () -> ok = WriteConfig ("localhost", 20602, 3) end,
-      ?_assertEqual ({1, [{"localhost",20602, 3}]}, parse_config (ConfigFile)),
+      ?_assertEqual ([{trace,{1,[{"localhost",20602,3}]}},
+                      {log,{1,[{"localhost",20602,3}]}},
+                      {perf,{1,[{"localhost",20602,3}]}},
+                      {stats,{1, [{"localhost",20602,3}]}}],
+                      parse_config (ConfigFile)),
       fun () -> ok = DeleteConfig () end
     ]
   }.

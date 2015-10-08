@@ -19,7 +19,13 @@
 -define (MD_NUM,           <<"num">>).
 -define (MD_HOST,          <<"host">>).
 
-% tokens in Mondemand::StatsMsg
+% tokens in MonDemand::PerfMsg
+-define (MD_PERF_ID, <<"id">>).
+-define (MD_PERF_LABEL, <<"label">>).
+-define (MD_PERF_START, <<"start">>).
+-define (MD_PERF_END, <<"end">>).
+
+% tokens in MonDemand::StatsMsg
 -define (MD_STATS_K,             <<"k">>).
 -define (MD_STATS_V,             <<"v">>).
 -define (MD_STATS_T,             <<"t">>).

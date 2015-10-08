@@ -1,3 +1,7 @@
+Version 5.4.0 (molinaro)
+  * support performance messages as well as allowing sending of different
+  events to different channels.
+
 Version 5.3.1 (molinaro)
   * typo in restart code meant hot-restarts were failing with bad_ip_port
 

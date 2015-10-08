@@ -53,6 +53,9 @@
            send_trace/3,
            send_trace/5,
 
+           send_perf_info/2,  % (Id, Timings)
+           send_perf_info/4,  % (Id, Label, StartTime, StopTime)
+
            % other functions
            send_stats/3,
            reset_stats/0,
@@ -73,7 +76,12 @@
             code_change/3
           ]).
 
--record (state, {config, interval, jitter, timer, channel}).
+-record (state, { config,
+                  interval,
+                  jitter,
+                  timer,
+                  channels = dict:new()
+                }).
 
 %-=====================================================================-
 %-                                  API                                -
@@ -206,6 +214,19 @@ send_trace (ProgId, Owner, TraceId, Message, Context) ->
         })
   end.
 
+send_perf_info (Id, Label, StartTime, EndTime) ->
+  Event = mondemand_perfmsg:to_lwes (
+            mondemand_perfmsg:new (Id, Label, StartTime, EndTime)
+          ),
+  send_event (Event).
+
+send_perf_info (Id, Timings) ->
+  Event =
+    mondemand_perfmsg:to_lwes (
+      mondemand_perfmsg:new (Id, Timings)
+    ),
+  send_event (Event).
+
 send_stats (ProgId, Context, Stats) ->
   Event =
     mondemand_statsmsg:to_lwes (
@@ -246,9 +267,8 @@ init([]) ->
     {error, Error} ->
       {stop, {error, Error}};
     Config ->
-      case lwes:open (emitters, Config) of
-        {ok, Channel} ->
-
+      case open_all (Config) of
+        {ok, ChannelDict} ->
           Jitter =
             case Interval =/= 0 of
               true ->
@@ -271,7 +291,7 @@ init([]) ->
               config = Config,
               jitter = Jitter,
               interval = Interval,
-              channel = Channel
+              channels = ChannelDict
             }
           };
         {error, Error} ->
@@ -284,11 +304,12 @@ handle_call (get_state, _From, State) ->
   {reply, State, State};
 % restart with currently assigned config
 handle_call (restart, _From,
-             State = #state { config = Config, channel = OldChannel }) ->
-  case lwes:open (emitters, Config) of
-    {ok, NewChannel} ->
-      lwes:close (OldChannel),
-      {reply, ok, State#state {channel = NewChannel}};
+             State = #state { config = Config,
+                              channels = OldChannelDict }) ->
+  case open_all (Config) of
+    {ok, NewChannelDict} ->
+      close_all (OldChannelDict),
+      {reply, ok, State#state {channels = NewChannelDict}};
     {error, E} ->
       {reply, {error, E, Config}, State}
   end;
@@ -308,10 +329,18 @@ handle_call (_Request, _From, State) ->
   {reply, ok, State}.
 
 % send an event
-handle_cast ({send, Event}, State = #state { channel = Channel }) ->
-  lwes:emit (Channel, Event),
-  {noreply, State};
-% fallback
+handle_cast ({send, Name, Event},
+             State = #state { channels = ChannelDict }) ->
+  NewState =
+    case dict:find (Name, ChannelDict) of
+      {ok, Channels} ->
+        NewChannels = lwes:emit (Channels, Event),
+        State#state { channels = dict:store (Name, NewChannels, ChannelDict)};
+      _ ->
+        error_logger:error_msg ("Unrecognized event ~p",[Name]),
+        State
+    end,
+  { noreply, NewState };
 handle_cast (_Request, State) ->
   {noreply, State}.
 
@@ -325,7 +354,8 @@ handle_info (flush, State = #state {}) ->
 handle_info (_Info, State) ->
   {noreply, State}.
 
-terminate (_Reason, _State) ->
+terminate (_Reason, #state { channels = ChannelDict }) ->
+  close_all (ChannelDict),
   ok.
 
 code_change (_OldVsn, State, _Extra) ->
@@ -336,11 +366,36 @@ code_change (_OldVsn, State, _Extra) ->
 %%====================================================================
 send_event (Events) when is_list (Events) ->
   [ send_event (Event) || Event <- Events ];
-send_event (Event = #lwes_event {}) ->
-  gen_server:cast (?MODULE, {send, lwes_event:to_binary (Event)}).
+send_event (Event = #lwes_event { name = Name }) ->
+  gen_server:cast (?MODULE, {send, Name, lwes_event:to_binary (Event)}).
 
 flush_one (Stats) ->
   send_event (mondemand_statsmsg:to_lwes (Stats)).
+
+open_all (Config) ->
+  lists:foldl (fun ({T,C},{ok, D}) ->
+                     EventKey =
+                       case T of
+                         trace -> ?MD_TRACE_EVENT;
+                         log -> ?MD_LOG_EVENT;
+                         perf -> ?MD_PERF_EVENT;
+                         stats -> ?MD_STATS_EVENT
+                       end,
+                     case lwes:open (emitters, C) of
+                       {ok, Chnnls} ->
+                         {ok, dict:store (EventKey, Chnnls,D)};
+                       {error, Error} ->
+                         {error, Error}
+                     end;
+                   (_,{error, Error}) ->
+                     {error, Error}
+               end,
+               {ok, dict:new()},
+               Config
+              ).
+
+close_all (ChannelDict) ->
+  [ lwes:close (Channels) || {_, Channels} <- dict:to_list (ChannelDict) ].
 
 %%--------------------------------------------------------------------
 %%% Test functions
