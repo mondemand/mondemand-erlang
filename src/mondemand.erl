@@ -53,8 +53,11 @@
            send_trace/3,
            send_trace/5,
 
-           send_perf_info/2,  % (Id, Timings)
-           send_perf_info/4,  % (Id, Label, StartTime, StopTime)
+           % performance tracing functions
+           send_perf_info/3,  % (Id, CallerLabel, Timings)
+           send_perf_info/4,  % (Id, CallerLabel, Timings, Context)
+           send_perf_info/5,  % (Id, CallerLabel, Label, StartTime, StopTime)
+           send_perf_info/6,  % (Id, CallerLabel, Label, StartTime, StopTime, Context)
 
            % other functions
            send_stats/3,
@@ -214,18 +217,30 @@ send_trace (ProgId, Owner, TraceId, Message, Context) ->
         })
   end.
 
-send_perf_info (Id, Label, StartTime, EndTime) ->
-  Event = mondemand_perfmsg:to_lwes (
-            mondemand_perfmsg:new (Id, Label, StartTime, EndTime)
-          ),
-  send_event (Event).
 
-send_perf_info (Id, Timings) ->
-  Event =
-    mondemand_perfmsg:to_lwes (
-      mondemand_perfmsg:new (Id, Timings)
-    ),
-  send_event (Event).
+send_perf_info (Id, CallerLabel, Timings, Context)
+  when is_list (Timings), is_list (Context) ->
+    Event =
+      mondemand_perfmsg:to_lwes (
+        mondemand_perfmsg:new (Id, CallerLabel, Timings, Context)
+      ),
+    send_event (Event).
+
+send_perf_info (Id, CallerLabel, Timings)
+  when is_list (Timings) ->
+    send_perf_info (Id, CallerLabel, Timings, []).
+
+send_perf_info (Id, CallerLabel, Label, StartTime, StopTime, Context)
+  when is_list (Context) ->
+    Event =
+      mondemand_perfmsg:to_lwes (
+        mondemand_perfmsg:new (Id, CallerLabel, Label,
+                               StartTime, StopTime, Context)
+      ),
+    send_event (Event).
+
+send_perf_info (Id, CallerLabel, Label, StartTime, StopTime) ->
+  send_perf_info (Id, CallerLabel, Label, StartTime, StopTime, []).
 
 send_stats (ProgId, Context, Stats) ->
   Event =

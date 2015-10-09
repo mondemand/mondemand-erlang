@@ -1,3 +1,7 @@
+Version 5.4.1 (molinaro)
+  * missing file in 5.4.0 release, as well as some additions to the
+performance tracing event.  Added contexts and a caller_label
+
 Version 5.4.0 (molinaro)
   * support performance messages as well as allowing sending of different
   events to different channels.

@@ -13,7 +13,13 @@
 -define (MD_PERF_EVENT, <<"MonDemand::PerfMsg">>).
 
 % internal record for MonDemand::PerfMsg
--record (md_perf_msg, { id, timings = [] }).
+-record (md_perf_msg, { id,
+                        caller_label,
+                        num_context = 0,
+                        context = [],
+                        num_timings = 0,
+                        timings = []
+                      }).
 -record (md_perf_timing, { label, start_time, end_time }).
 
 % related to stats messages

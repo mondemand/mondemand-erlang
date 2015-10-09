@@ -160,11 +160,7 @@ from_lwes (#lwes_event { attrs = Data}) ->
   }.
 
 metrics_from_lwes (Data) ->
-  Num =
-    case dict:find (?MD_NUM, Data) of
-      error -> 0;
-      {ok, C} -> C
-    end,
+  Num = mondemand_util:find_in_dict (?MD_NUM, Data, 0),
   { Num,
     lists:map (
       fun (N) ->

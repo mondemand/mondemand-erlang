@@ -54,11 +54,7 @@ context_from_context (DefaultHost, Context) ->
 
 
 context_from_lwes (Data) ->
-  Num =
-    case dict:find (?MD_CTXT_NUM, Data) of
-      error -> 0;
-      {ok, C} -> C
-    end,
+  Num = mondemand_util:find_in_dict (?MD_NUM, Data, 0),
   { Host, Context } =
     lists:foldl ( fun (N, {H, A}) ->
                     K = dict:fetch (context_name_key (N), Data),
@@ -82,13 +78,23 @@ context_value_key (N) ->
 context_to_lwes (Host, NumContexts, Context) ->
   case lists:keymember (?MD_HOST, 1, Context) of
     false ->
-      [
-        { ?LWES_U_INT_16, ?MD_CTXT_NUM, NumContexts + 1},
-        lists:zipwith (fun context_to_lwes/2,
-                       lists:seq (1, NumContexts),
-                       Context),
-        context_to_lwes (NumContexts+1, { ?MD_HOST, Host })
-      ];
+      case Host of
+        undefined ->
+          [
+            { ?LWES_U_INT_16, ?MD_CTXT_NUM, NumContexts},
+            lists:zipwith (fun context_to_lwes/2,
+                           lists:seq (1, NumContexts),
+                           Context)
+          ];
+        _ ->
+          [
+            { ?LWES_U_INT_16, ?MD_CTXT_NUM, NumContexts + 1},
+            lists:zipwith (fun context_to_lwes/2,
+                           lists:seq (1, NumContexts),
+                           Context),
+            context_to_lwes (NumContexts+1, { ?MD_HOST, Host })
+          ]
+     end;
     true ->
       [
         { ?LWES_U_INT_16, ?MD_CTXT_NUM, NumContexts},

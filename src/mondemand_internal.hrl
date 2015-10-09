@@ -21,6 +21,7 @@
 
 % tokens in MonDemand::PerfMsg
 -define (MD_PERF_ID, <<"id">>).
+-define (MD_PERF_CALLER_LABEL, <<"caller_label">>).
 -define (MD_PERF_LABEL, <<"label">>).
 -define (MD_PERF_START, <<"start">>).
 -define (MD_PERF_END, <<"end">>).

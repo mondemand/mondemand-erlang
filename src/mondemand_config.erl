@@ -45,8 +45,18 @@ lwes_config () ->
   % they are checked in that order
   case application:get_env (mondemand, lwes_channel) of
     {ok, {H,P}} when is_list (H), is_integer (P) ->
-      {1, [{H,P}]}; % allow old config style to continue to work
-    {ok, Config} -> Config;      % new style is to just pass anything through
+      % allow old config style to continue to work
+      [ {T, {1,[{H,P}]}} || T <- [ stats, perf,log, trace ] ];
+    {ok, {N, L}} when is_integer (N), is_list (L) ->
+      % allow old config style to continue to work
+      [ {T, {N, L} } || T <- [ stats, perf,log, trace ] ];
+    {ok, Config} when is_list (Config) ->
+      case valid_config (Config) of
+        false ->
+          {error, invalid_config}; % new style is to just pass anything through
+        true ->
+          Config
+      end;
     undefined ->
       case application:get_env (mondemand, config_file) of
         {ok, File} ->
@@ -55,6 +65,14 @@ lwes_config () ->
           {error, no_lwes_channel_configured}
       end
   end.
+
+valid_config (Config) when is_list (Config) ->
+  lists:foldl (fun (T, A) ->
+                 lists:keymember (T, 1, Config) andalso A
+               end,
+               true,
+               [stats, perf, log, trace]).
+
 
 parse_config (File) ->
   case read_file (File) of
