@@ -1,0 +1,80 @@
+-module (mondemand_perfmsg).
+
+-include ("mondemand_internal.hrl").
+-include_lib ("lwes/include/lwes.hrl").
+
+-export ([ new/2,        % (Id, [{Label, Start, End}])
+           new/4,        % (Id, Label, Start, End)
+           new_timing/3, % (Label, Start, End)
+           to_lwes/1,
+           from_lwes/1
+         ]).
+
+new (Id, Timings) ->
+  ValidatedTimings = [ new_timing (L, S, E) || { L, S, E } <- Timings ],
+  #md_perf_msg { id = Id, timings = ValidatedTimings }.
+new (Id, Label, Start, End) ->
+  #md_perf_msg { id = Id, timings = [ new_timing (Label, Start, End) ] }.
+
+new_timing (Label, Start, End) ->
+  #md_perf_timing { label = Label,
+                    start_time = validate_time (Start),
+                    end_time = validate_time (End)
+                  }.
+
+validate_time (Timestamp = {_,_,_}) ->
+  mondemand_util:now_to_epoch_millis (Timestamp);
+validate_time (Timestamp) when is_integer (Timestamp) ->
+  Timestamp.
+
+timings_from_lwes (Data) ->
+  Num =
+    case dict:find (?MD_NUM, Data) of
+      error -> 0;
+      {ok, C} -> C
+    end,
+  { Num,
+    lists:foreach (fun(N) ->
+                     timing_from_lwes (N, Data)
+                   end,
+                   lists:seq (1, Num)) }.
+
+timing_from_lwes (TimingIndex, Data) ->
+  L = dict:fetch (perf_label_key (TimingIndex), Data),
+  S = dict:fetch (perf_start_key (TimingIndex), Data),
+  E = dict:fetch (perf_end_key (TimingIndex), Data),
+  #md_perf_timing { label = L, start_time = S, end_time = E }.
+
+timings_to_lwes (Timings) ->
+  lists:zipwith (fun timing_to_lwes/2,
+                 lists:seq (1, length(Timings)),
+                 Timings).
+
+timing_to_lwes (TimingIndex,
+                #md_perf_timing { label = L, start_time = S, end_time = E }) ->
+  [ { ?LWES_STRING, perf_label_key (TimingIndex), L },
+    { ?LWES_INT_64, perf_start_key (TimingIndex), S },
+    { ?LWES_INT_64, perf_end_key (TimingIndex), E } ].
+
+to_lwes (L) when is_list (L) ->
+  lists:map (fun to_lwes/1, L);
+to_lwes (#md_perf_msg { id = Id,
+                        timings = Timings }) ->
+  #lwes_event {
+    name = ?MD_PERF_EVENT,
+    attrs = lists:flatten ([ { ?LWES_STRING, ?MD_PERF_ID, Id },
+                            timings_to_lwes (Timings) ])
+  }.
+
+from_lwes (#lwes_event { attrs = Data}) ->
+  #md_perf_msg { id = dict:fetch (?MD_PERF_ID, Data),
+                 timings = timings_from_lwes (Data) }.
+
+perf_label_key (N) ->
+  ?ELEMENT_OF_TUPLE_LIST (N, ?MD_PERF_LABEL).
+
+perf_start_key (N) ->
+  ?ELEMENT_OF_TUPLE_LIST (N, ?MD_PERF_START).
+
+perf_end_key (N) ->
+  ?ELEMENT_OF_TUPLE_LIST (N, ?MD_PERF_END).
