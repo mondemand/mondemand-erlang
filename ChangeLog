@@ -1,3 +1,6 @@
+Version 5.4.2 (molinaro)
+  * problem with context deserialization
+
 Version 5.4.1 (molinaro)
   * missing file in 5.4.0 release, as well as some additions to the
 performance tracing event.  Added contexts and a caller_label

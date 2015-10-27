@@ -52,9 +52,8 @@ context_from_context (DefaultHost, Context) ->
     {value, {?MD_HOST, Host}, NewContext} -> {Host, NewContext}
   end.
 
-
 context_from_lwes (Data) ->
-  Num = mondemand_util:find_in_dict (?MD_NUM, Data, 0),
+  Num = mondemand_util:find_in_dict (?MD_CTXT_NUM, Data, 0),
   { Host, Context } =
     lists:foldl ( fun (N, {H, A}) ->
                     K = dict:fetch (context_name_key (N), Data),
