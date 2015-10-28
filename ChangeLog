@@ -1,3 +1,12 @@
+Version 5.5.0 (molinaro)
+  * vmstats can now be sent once a minute via mondemand when specified in the
+    application config file.  A program id is required so a minimal config
+    might be something like
+      { vmstats, [ { program_id, mondemand } ] }
+    in addition a context could be added via a context parameter with a
+    2-tuple list as an argument like
+      { vmstats, [ { program_id, mondemand }, {context, [{foo,bar}]} ] }
+
 Version 5.4.2 (molinaro)
   * problem with context deserialization
 
