@@ -49,10 +49,11 @@ validate_time (Timestamp) when is_integer (Timestamp) ->
 timings_from_lwes (Data) ->
   Num = mondemand_util:find_in_dict (?MD_NUM, Data, 0),
   { Num,
-    lists:foreach (fun(N) ->
-                     timing_from_lwes (N, Data)
-                   end,
-                   lists:seq (1, Num)) }.
+    lists:map (fun(N) ->
+                 timing_from_lwes (N, Data)
+               end,
+               lists:seq (1, Num))
+  }.
 
 timing_from_lwes (TimingIndex, Data) ->
   L = dict:fetch (perf_label_key (TimingIndex), Data),

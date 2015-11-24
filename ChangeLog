@@ -1,3 +1,6 @@
+Version 5.5.1 (molinaro)
+  * performance trace deserialization was broken
+
 Version 5.5.0 (molinaro)
   * vmstats can now be sent once a minute via mondemand when specified in the
     application config file.  A program id is required so a minimal config

@@ -89,7 +89,9 @@ from_udp (Packet = {udp, _, SenderIp, SenderPort, _}) ->
                   sender_port = SenderPort,
                   name = ?MD_TRACE_EVENT,
                   msg = lwes_event:from_udp_packet (Packet, json_eep18) };
-    Name when Name =:= ?MD_STATS_EVENT; Name =:= ?MD_LOG_EVENT ->
+    Name when Name =:= ?MD_STATS_EVENT;
+              Name =:= ?MD_LOG_EVENT;
+              Name =:= ?MD_PERF_EVENT ->
       % deserialize the event as a dictionary
       Event = #lwes_event { attrs = Data }
           = lwes_event:from_udp_packet (Packet, dict),
@@ -104,7 +106,12 @@ from_udp (Packet = {udp, _, SenderIp, SenderPort, _}) ->
                   sender_port = SenderPort,
                   receipt_time = ReceiptTime,
                   name = Name,
-                  msg = Msg }
+                  msg = Msg };
+    Other ->
+      error_logger:error_msg ("Unrecognized Event ~p : ~p",
+                              [Other,
+                               lwes_event:from_udp_packet (Packet, dict)]),
+      undefined
   end.
 
 to_lwes (#md_event { name = Name, msg = Msg }) ->
