@@ -263,11 +263,11 @@ listen (Config) ->
   {ok, L} = lwes:open (listener, Config),
   lwes:listen (L,
                fun (E, S) ->
-                 Stats = mondemand_statsmsg:from_lwes (E),
+                 Stats = mondemand_event:from_udp (E),
                  io:format ("~p~n",[Stats]),
                  S
                end,
-               dict,
+               raw,
                ok).
 
 dummy () ->
