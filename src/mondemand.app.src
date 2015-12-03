@@ -4,7 +4,7 @@
    { vsn, "5.5.1" },
    { modules, [] },
    { registered, [mondemand,mondemand_sup]},
-   { applications, [kernel,stdlib,lwes]},
+   { applications, [kernel,stdlib,syntax_tools,lwes]},
    { env, [
        { config_file,"/etc/mondemand/mondemand.conf"},
        { send_interval, 60 }

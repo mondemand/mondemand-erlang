@@ -1,3 +1,6 @@
+Version 5.5.2 (molinaro)
+  * syntax_tools needs to be in the required apps
+
 Version 5.5.1 (molinaro)
   * performance trace deserialization was broken
 
