@@ -51,7 +51,9 @@
                       memory_binary,
                       memory_ets,
                       process_count,
-                      process_limit
+                      process_limit,
+                      port_count,
+                      port_limit
                     }).
 
 %-=====================================================================-
@@ -166,14 +168,16 @@ collect_sample () ->
     ),
 
   Memory = erlang:memory(),
-  TotalMemory = proplists:get_value (total, Memory),
-  ProcessMemory = proplists:get_value (processes_used, Memory),
-  SystemMemory = proplists:get_value (system, Memory),
-  AtomUsed = proplists:get_value (atom_used, Memory),
-  BinaryMemory = proplists:get_value (binary, Memory),
-  EtsMemory = proplists:get_value (ets, Memory),
-  ProcessCount = erlang:system_info (process_count),
+  TotalMemory = proplists:get_value(total, Memory),
+  ProcessMemory = proplists:get_value(processes_used, Memory),
+  SystemMemory = proplists:get_value(system, Memory),
+  AtomUsed = proplists:get_value(atom_used, Memory),
+  BinaryMemory = proplists:get_value(binary, Memory),
+  EtsMemory = proplists:get_value(ets, Memory),
+  ProcessCount = erlang:system_info(process_count),
   ProcessLimit = erlang:system_info(process_limit),
+  PortCount = erlang:system_info(port_count),
+  PortLimit = erlang:system_info(port_limit),
 
   #vm_sample {
     timestamp = Timestamp,
@@ -194,7 +198,9 @@ collect_sample () ->
     memory_binary = BinaryMemory,
     memory_ets = EtsMemory,
     process_count = ProcessCount,
-    process_limit = ProcessLimit
+    process_limit = ProcessLimit,
+    port_count = PortCount,
+    port_limit = PortLimit
   }.
 
 to_mondemand (#vm_sample {
@@ -226,7 +232,9 @@ to_mondemand (#vm_sample {
                memory_binary = BinaryMemory,
                memory_ets = EtsMemory,
                process_count = ProcessCount,
-               process_limit = ProcessLimit
+               process_limit = ProcessLimit,
+               port_count = PortCount,
+               port_limit = PortLimit
              }) ->
     [
       { gauge, context_switches, ContextSwitches - PrevContextSwitches },
@@ -246,7 +254,9 @@ to_mondemand (#vm_sample {
       { gauge, memory_binary, BinaryMemory },
       { gauge, memory_ets, EtsMemory },
       { gauge, process_count, ProcessCount },
-      { gauge, process_limit, ProcessLimit }
+      { gauge, process_limit, ProcessLimit },
+      { gauge, port_count, PortCount },
+      { gauge, port_limit, PortLimit }
     ].
 
 %%--------------------------------------------------------------------
