@@ -130,7 +130,6 @@ parse_value (Prefix, Suffix, Line) ->
   parse_value (Prefix, Suffix, Line, undefined).
 
 parse_value (Prefix, Suffix, Line, Default) ->
-  io:format ("line is ~p~n",[Line]),
   case re:run (Line, Prefix ++ Suffix ++ "=\"([^\"]+)\"",
                [{capture, all_but_first, list}]) of
     nomatch -> Default;
@@ -159,7 +158,7 @@ read_file (File) ->
   end.
 
 parse_prefix_config (Prefix, Bin) ->
-  HostOrHosts = parse_value (Prefix, "ADDR", Bin),
+  HostOrHosts = coerce (parse_value (Prefix, "ADDR", Bin), list),
   PortOrPorts = coerce (parse_value (Prefix, "PORT", Bin), integer),
   TTLOrTTLs = coerce (parse_value (Prefix, "TTL", Bin), integer),
   MaybeSendTo =

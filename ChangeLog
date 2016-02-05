@@ -1,3 +1,6 @@
+Version 5.7.1 (molinaro)
+  * minor dialyzer issue
+
 Version 5.7.0 (molinaro)
   * add annotation message support
   * add accessors for performance messages
