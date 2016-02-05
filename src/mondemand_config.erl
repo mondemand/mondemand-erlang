@@ -1,11 +1,29 @@
 -module (mondemand_config).
-
+%
+% There are currently 2 ways to configure mondemand lwes channels
+%
+% 1. via application variables
+% 2. via a config file (the default location is /etc/mondemand/mondemand.conf)
+%
+% the format of the file is
+%
+% MONDEMAND_ADDR="127.0.0.1,127.0.0.1"
+% MONDEMAND_PORT="12221,12321"
+% MONDEMAND_TTL="3"
+%
+% MONDEMAND_PERF_ADDR="127.0.0.1,127.0.0.1"
+% MONDEMAND_PERF_PORT="12221,12321"
+% MONDEMAND_PERF_SENDTO="1"
+%
+% there are currently no comment characters
+%
 -export ([ init/0,
            host/0,
            default_max_sample_size/0,
            default_stats/0,
            lwes_config/0,
-           minutes_to_keep/0
+           minutes_to_keep/0,
+           parse_config/1
          ]).
 
 -define (DEFAULT_MAX_SAMPLE_SIZE, 10).
@@ -46,10 +64,10 @@ lwes_config () ->
   case application:get_env (mondemand, lwes_channel) of
     {ok, {H,P}} when is_list (H), is_integer (P) ->
       % allow old config style to continue to work
-      [ {T, {1,[{H,P}]}} || T <- [ stats, perf,log, trace ] ];
+      [ {T, {1,[{H,P}]}} || T <- [ stats, perf, log, trace, annotation ] ];
     {ok, {N, L}} when is_integer (N), is_list (L) ->
       % allow old config style to continue to work
-      [ {T, {N, L} } || T <- [ stats, perf,log, trace ] ];
+      [ {T, {N, L} } || T <- [ stats, perf, log, trace, annotation ] ];
     {ok, Config} when is_list (Config) ->
       case valid_config (Config) of
         false ->
@@ -71,7 +89,7 @@ valid_config (Config) when is_list (Config) ->
                  lists:keymember (T, 1, Config) andalso A
                end,
                true,
-               [stats, perf, log, trace]).
+               [stats, perf, log, trace, annotation]).
 
 
 parse_config (File) ->
@@ -89,7 +107,7 @@ parse_config (File) ->
                       end } | A ]
             end,
             [],
-            [ stats, perf, log, trace])
+            [ stats, perf, log, trace, annotation])
       end
   end.
 
@@ -103,31 +121,33 @@ parse_type_config (File, stats) ->
 parse_type_config (File, log) ->
   parse_prefix_config ("MONDEMAND_LOG_", File);
 parse_type_config (File, trace) ->
-  parse_prefix_config ("MONDEMAND_TRACE_", File).
+  parse_prefix_config ("MONDEMAND_TRACE_", File);
+parse_type_config (File, annotation) ->
+  parse_prefix_config ("MONDEMAND_ANNOTATION_", File).
+
 
 parse_value (Prefix, Suffix, Line) ->
   parse_value (Prefix, Suffix, Line, undefined).
 
 parse_value (Prefix, Suffix, Line, Default) ->
+  io:format ("line is ~p~n",[Line]),
   case re:run (Line, Prefix ++ Suffix ++ "=\"([^\"]+)\"",
                [{capture, all_but_first, list}]) of
     nomatch -> Default;
     {match, [H]} ->
       case string:tokens (H, " ,") of
-        [] -> error;
+        [] -> Default;
         H1 -> H1
       end
   end.
 
 coerce (undefined, _) -> undefined;
-coerce (L, T) when is_list(L) ->
+coerce (L = [[_|_]|_], T) ->
   [ case T of
       list -> E;
       integer -> list_to_integer (E)
     end || E <- L
-  ];
-coerce (I, integer) ->
-  list_to_integer (I).
+  ].
 
 single (undefined) -> undefined;
 single ([H]) -> H.
@@ -247,14 +267,16 @@ config_file_test_ () ->
       % delete any files from failed tests
       fun () -> DeleteConfig () end,
       fun () -> ok = WriteConfig ("localhost", 20602, undefined) end,
-      ?_assertEqual ([{trace,{1,[{"localhost",20602}]}},
+      ?_assertEqual ([{annotation,{1,[{"localhost",20602}]}},
+                      {trace,{1,[{"localhost",20602}]}},
                       {log,{1,[{"localhost",20602}]}},
                       {perf,{1,[{"localhost",20602}]}},
                       {stats,{1,[{"localhost",20602}]}}],
                      parse_config (ConfigFile)),
       fun () -> ok = DeleteConfig () end,
       fun () -> ok = WriteConfig ("localhost", 20602, 3) end,
-      ?_assertEqual ([{trace,{1,[{"localhost",20602,3}]}},
+      ?_assertEqual ([{annotation,{1,[{"localhost",20602,3}]}},
+                      {trace,{1,[{"localhost",20602,3}]}},
                       {log,{1,[{"localhost",20602,3}]}},
                       {perf,{1,[{"localhost",20602,3}]}},
                       {stats,{1, [{"localhost",20602,3}]}}],

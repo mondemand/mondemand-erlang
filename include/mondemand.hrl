@@ -9,6 +9,21 @@
                      name,
                      msg
                    }).
+
+% related to annotation messages
+-define (MD_ANNOTATION_EVENT, <<"MonDemand::AnnotationMsg">>).
+
+% internal record for MonDemand::Annotation
+-record (md_annotation_msg, { id,
+                              timestamp,
+                              text,
+                              description,
+                              num_tags = 0,
+                              tags = [],
+                              num_context = 0,
+                              context = []
+                            }).
+
 % related to perf messages
 -define (MD_PERF_EVENT, <<"MonDemand::PerfMsg">>).
 

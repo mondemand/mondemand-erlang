@@ -40,14 +40,14 @@
            % stats functions
            % counters
            increment/2,   % (ProgId, Key)
-           increment/3,   % (ProgId, Key, Amount | Context )
-           increment/4,   % (ProgId, Key, Amount | Context, Context | Amount )
+           increment/3,   % (ProgId, Key, Amount | [{ContextKey,ContextValue}])
+           increment/4,   % (ProgId, Key, Amount | [{ContextKey,ContextValue}], [{ContextKey,ContextValue}]| Amount )
            % gauges
            set/3,         % (ProgId, Key, Value)
-           set/4,         % (ProgId, Key, Context, Value)
+           set/4,         % (ProgId, Key, [{ContextKey,ContextValue}], Value)
            % statsets
            add_sample/3,  % (ProgId, Key, Value)
-           add_sample/4,  % (ProgId, Key, Context, Value)
+           add_sample/4,  % (ProgId, Key, [{ContextKey,ContextValue}], Value)
 
            % tracing functions
            send_trace/3,
@@ -55,9 +55,14 @@
 
            % performance tracing functions
            send_perf_info/3,  % (Id, CallerLabel, Timings)
-           send_perf_info/4,  % (Id, CallerLabel, Timings, Context)
+           send_perf_info/4,  % (Id, CallerLabel, Timings, [{ContextKey,ContextValue}])
            send_perf_info/5,  % (Id, CallerLabel, Label, StartTime, StopTime)
-           send_perf_info/6,  % (Id, CallerLabel, Label, StartTime, StopTime, Context)
+           send_perf_info/6,  % (Id, CallerLabel, Label, StartTime, StopTime, [{ContextKey,ContextValue}])
+
+           % annotation functions
+           send_annotation/4, % (Id, Timestamp, Description, Text)
+           send_annotation/5, % (Id, Timestamp, Description, Text, [Tag])
+           send_annotation/6, % (Id, Timestamp, Description, Text, [Tag],[{ContextKey,ContextValue}])
 
            % other functions
            send_stats/3,
@@ -217,7 +222,6 @@ send_trace (ProgId, Owner, TraceId, Message, Context) ->
         })
   end.
 
-
 send_perf_info (Id, CallerLabel, Timings, Context)
   when is_list (Timings), is_list (Context) ->
     Event =
@@ -241,6 +245,18 @@ send_perf_info (Id, CallerLabel, Label, StartTime, StopTime, Context)
 
 send_perf_info (Id, CallerLabel, Label, StartTime, StopTime) ->
   send_perf_info (Id, CallerLabel, Label, StartTime, StopTime, []).
+
+send_annotation (Id, Time, Description, Text) ->
+  send_annotation (Id, Time, Description, Text, [], []).
+
+send_annotation (Id, Time, Description, Text, Tags) ->
+  send_annotation (Id, Time, Description, Text, Tags, []).
+send_annotation (Id, Time, Description, Text, Tags, Context) ->
+  Event =
+    mondemand_annotationmsg:to_lwes (
+      mondemand_annotationmsg:new (Id, Time, Description, Text, Tags, Context)
+    ),
+  send_event (Event).
 
 send_stats (ProgId, Context, Stats) ->
   Event =
@@ -363,7 +379,7 @@ handle_cast ({send, Name, Event},
         NewChannels = lwes:emit (Channels, Event),
         State#state { channels = dict:store (Name, NewChannels, ChannelDict)};
       _ ->
-        error_logger:error_msg ("Unrecognized event ~p",[Name]),
+        error_logger:error_msg ("Unrecognized event ~p : ~p",[Name, dict:to_list(ChannelDict)]),
         State
     end,
   { noreply, NewState };
@@ -405,7 +421,8 @@ open_all (Config) ->
                          trace -> ?MD_TRACE_EVENT;
                          log -> ?MD_LOG_EVENT;
                          perf -> ?MD_PERF_EVENT;
-                         stats -> ?MD_STATS_EVENT
+                         stats -> ?MD_STATS_EVENT;
+                         annotation -> ?MD_ANNOTATION_EVENT
                        end,
                      case lwes:open (emitters, C) of
                        {ok, Chnnls} ->

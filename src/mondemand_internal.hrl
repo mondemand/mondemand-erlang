@@ -19,6 +19,14 @@
 -define (MD_NUM,           <<"num">>).
 -define (MD_HOST,          <<"host">>).
 
+% token in MonDemand::Annotation
+-define (MD_ANNOTATION_ID,      <<"id">>).
+-define (MD_ANNOTATION_TIMESTAMP,<<"timestamp">>).
+-define (MD_ANNOTATION_TEXT,   <<"text">>).
+-define (MD_ANNOTATION_DESCRIPTION, <<"description">>).
+-define (MD_ANNOTATION_TAG,     <<"tag">>).
+-define (MD_ANNOTATION_TAG_NUM, <<"tag_num">>).
+
 % tokens in MonDemand::PerfMsg
 -define (MD_PERF_ID, <<"id">>).
 -define (MD_PERF_CALLER_LABEL, <<"caller_label">>).

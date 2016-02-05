@@ -1,3 +1,8 @@
+Version 5.7.0 (molinaro)
+  * add annotation message support
+  * add accessors for performance messages
+  * fix for R15B port calls
+
 Version 5.6.0 (molinaro)
   * add port count and limit to vmstats
 
