@@ -16,7 +16,7 @@
 -export ([start_link/0,
           to_mondemand/0,
           to_list/0,
-          collect_sample/0]).
+          collect_sample/1]).
 
 %% gen_server callbacks
 -export ( [ init/1,
@@ -29,6 +29,7 @@
 
 -record (state, {samples = queue:new(),
                  max_samples = 300,  % 5 minutes of sampled data
+                 legacy = false,     % old otp workarounds
                  previous_mondemand,
                  timer
                 }).
@@ -72,14 +73,22 @@ to_list() ->
 %-                        gen_server callbacks                         -
 %-=====================================================================-
 init([]) ->
-  InitialSample = collect_sample (),
+  % work around for the fact that R15B didn't have port_count
+  Legacy =
+    case application:get_env(mondemand,r15b_workaround) of
+      {ok, true} -> true;
+      _ -> false
+    end,
+
+  InitialSample = collect_sample (Legacy),
   InitialQueue = queue:in (InitialSample, queue:new ()),
   TRef = timer:send_interval (1000, collect), % collect samples every second
   % keep the initial sample as both the previous mondemand value and put
   % it into the queue
   { ok, #state{ samples = InitialQueue,
                 previous_mondemand = InitialSample,
-                timer = TRef } }.
+                timer = TRef,
+                legacy = Legacy } }.
 
 handle_call (to_list, _From, State = #state { samples = Queue }) ->
   {reply, queue:to_list (Queue), State};
@@ -98,10 +107,11 @@ handle_cast (_Request, State = #state { }) ->
 
 handle_info (collect,
              State = #state {samples = QueueIn,
-                             max_samples = Max
+                             max_samples = Max,
+                             legacy = Legacy
                             }) ->
   % collect a sample
-  CurrentSample = collect_sample (),
+  CurrentSample = collect_sample (Legacy),
 
   % insert it into the queue
   QueueOut =
@@ -127,7 +137,7 @@ code_change (_OldVsn, State, _Extra) ->
 %% private functions
 %%====================================================================
 
-collect_sample () ->
+collect_sample (Legacy) ->
 
   Timestamp = mondemand_util:seconds_since_epoch (),
 
@@ -176,8 +186,13 @@ collect_sample () ->
   EtsMemory = proplists:get_value(ets, Memory),
   ProcessCount = erlang:system_info(process_count),
   ProcessLimit = erlang:system_info(process_limit),
-  PortCount = erlang:system_info(port_count),
-  PortLimit = erlang:system_info(port_limit),
+
+  % R15B didn't have a good way to get these so working around this fact
+  {PortCount, PortLimit} =
+    case Legacy of
+      true -> {length(erlang:ports()), 0};
+      false -> {erlang:system_info(port_count), erlang:system_info(port_limit)}
+    end,
 
   #vm_sample {
     timestamp = Timestamp,

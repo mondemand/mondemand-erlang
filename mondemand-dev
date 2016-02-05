@@ -1,5 +1,11 @@
 #!/bin/sh
 
+extra=
+if test `erl -version 2>&1 | perl -lane 'print $F[-1]'` = "5.9.3.1" ; then
+  echo "r15b"
+  extra="-mondemand r15b_workaround 'true'"
+fi
+
 deps=
 for d in deps/* ; do
   deps="$deps -pa $d/ebin"
@@ -9,5 +15,6 @@ exec erl \
   $deps \
   -pa ebin \
   -config mondemand_dev.config \
+  $extra \
   -s reloader \
   -s mondemand_app
