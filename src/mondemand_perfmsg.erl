@@ -8,6 +8,15 @@
            new/5,        % (Id, CallerLabel, Label, Start, End)
            new/6,        % (Id, CallerLabel, Label, Start, End, [{Key, Value}])
            new_timing/3, % (Label, Start, End)
+           id/1,
+           caller_label/1,
+           timings/1,
+           num_timings/1,
+           timing_label/1,
+           timing_start_time/1,
+           timing_end_time/1,
+           context/1,
+           context_value/2,
            to_lwes/1,
            from_lwes/1
          ]).
@@ -45,6 +54,25 @@ validate_time (Timestamp = {_,_,_}) ->
   mondemand_util:now_to_epoch_millis (Timestamp);
 validate_time (Timestamp) when is_integer (Timestamp) ->
   Timestamp.
+
+id (#md_perf_msg { id = Id }) -> Id.
+caller_label (#md_perf_msg { caller_label = Caller }) -> Caller.
+timings (#md_perf_msg { timings = Timings }) -> Timings.
+num_timings (#md_perf_msg { num_timings = NumTimings }) -> NumTimings.
+
+timing_label (#md_perf_timing { label = Label }) -> Label.
+timing_start_time (#md_perf_timing { start_time = StartTime }) -> StartTime.
+timing_end_time (#md_perf_timing { end_time = StartTime }) -> StartTime.
+
+context (#md_perf_msg { context = Context }) -> Context.
+context_value (#md_perf_msg { context = Context }, ContextKey) ->
+  context_find (ContextKey, Context, undefined).
+
+context_find (Key, Context, Default) ->
+  case lists:keyfind (Key, 1, Context) of
+    false -> Default;
+    {_, H} -> H
+  end.
 
 timings_from_lwes (Data) ->
   Num = mondemand_util:find_in_dict (?MD_NUM, Data, 0),
@@ -112,3 +140,12 @@ perf_start_key (N) ->
 
 perf_end_key (N) ->
   ?ELEMENT_OF_TUPLE_LIST (N, ?MD_PERF_END).
+
+%-=====================================================================-
+%-                            Test Functions                           -
+%-=====================================================================-
+-ifdef (TEST).
+-include_lib ("eunit/include/eunit.hrl").
+
+
+-endif.
