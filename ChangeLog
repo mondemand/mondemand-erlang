@@ -1,3 +1,7 @@
+Version 5.8.0 (molinaro)
+  * significantly improved performance when deserializing performance events
+  * improved coverage of mondemand_perfmsg module
+
 Version 5.7.1 (molinaro)
   * minor dialyzer issue
 

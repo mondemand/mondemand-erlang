@@ -95,9 +95,16 @@ from_udp (Packet = {udp, _, SenderIp, SenderPort, _}) ->
                   sender_port = SenderPort,
                   name = ?MD_TRACE_EVENT,
                   msg = lwes_event:from_udp_packet (Packet, json_eep18) };
+    ?MD_PERF_EVENT ->
+      Event = lwes_event:from_udp_packet (Packet, list),
+      {ReceiptTime, Msg} = mondemand_perfmsg:from_lwes (Event),
+      #md_event { sender_ip = SenderIp,
+                  sender_port = SenderPort,
+                  receipt_time = ReceiptTime,
+                  name = ?MD_PERF_EVENT,
+                  msg = Msg };
     Name when Name =:= ?MD_STATS_EVENT;
               Name =:= ?MD_LOG_EVENT;
-              Name =:= ?MD_PERF_EVENT;
               Name =:= ?MD_ANNOTATION_EVENT ->
       % deserialize the event as a dictionary
       Event = #lwes_event { attrs = Data }
@@ -107,7 +114,6 @@ from_udp (Packet = {udp, _, SenderIp, SenderPort, _}) ->
         case Name of
           ?MD_STATS_EVENT -> mondemand_statsmsg:from_lwes (Event);
           ?MD_LOG_EVENT -> mondemand_logmsg:from_lwes (Event);
-          ?MD_PERF_EVENT -> mondemand_perfmsg:from_lwes (Event);
           ?MD_ANNOTATION_EVENT -> mondemand_annotationmsg:from_lwes (Event)
         end,
       #md_event { sender_ip = SenderIp,
