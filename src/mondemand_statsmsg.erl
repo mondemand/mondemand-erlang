@@ -31,6 +31,7 @@
 -export ([new/3,
           new/4,
           new/5,
+          new/6,
           new_statset/0,
           set_statset/3,
           get_statset/2,
@@ -42,6 +43,7 @@
           context_value/2,
           add_contexts/2,
           add_context/3,
+          new_metric/3,
           num_metrics/1,
           metrics/1,
           metric/1,
@@ -65,16 +67,19 @@
 new (ProgId, Context, Metrics) ->
   Host = mondemand_config:host (),
   new (ProgId, Context, Metrics, Host).
-new (ProgId, Context, Metrics = [{_,_,_}|_], Host) ->
+new (ProgId, Context, Metrics, Host) ->
+  new (ProgId, Context, Metrics, Host, undefined).
+new (ProgId, Context, Metrics, Host, CollectTime) ->
+  new (ProgId, Context, Metrics, Host, CollectTime, undefined).
+new (ProgId, Context, Metrics = [{_,_,_}|_], Host, CollectTime, SendTime) ->
   ValidatedMetrics = [ #md_metric { type = T, key = K, value = V }
                        || { T, K, V }
                        <- Metrics ],
-  new (ProgId, Context, ValidatedMetrics, Host);
-new (ProgId, Context, Metrics, Host) ->
-  new (ProgId, Context, Metrics, Host, undefined).
-
-new (ProgId, Context, Metrics, Host, Timestamp) ->
-  #md_stats_msg { collect_time = Timestamp,
+  new (ProgId, Context, ValidatedMetrics, Host, CollectTime, SendTime);
+new (ProgId, Context, Metrics = [#md_metric{}|_],
+     Host, CollectTime, SendTime) ->
+  #md_stats_msg { collect_time = CollectTime,
+                  send_time = SendTime,
                   prog_id = ProgId,
                   host = Host,
                   num_context = length (Context),
@@ -135,6 +140,11 @@ get_statset (pctl_99, S = #md_statset{}) -> S#md_statset.pctl_99.
 from_lwes (#lwes_event { attrs = Data}) ->
   % here's the name of the program which originated the metric
   ProgId = dict:fetch (?MD_PROG_ID, Data),
+  ReceiptTime =
+    case dict:find (?MD_RECEIPT_TIME, Data) of
+      error -> 0;
+      {ok, RT} -> RT
+    end,
   SendTime =
     case dict:find (?MD_SEND_TIME, Data) of
       error -> undefined;
@@ -148,15 +158,17 @@ from_lwes (#lwes_event { attrs = Data}) ->
   {Host, NumContexts, Context} = mondemand_util:context_from_lwes (Data),
   {NumMetrics, Metrics} = metrics_from_lwes (Data),
 
-  #md_stats_msg {
-    send_time = SendTime,
-    collect_time = CollectTime,
-    prog_id = ProgId,
-    host = Host,
-    num_context = NumContexts,
-    context = Context,
-    num_metrics = NumMetrics,
-    metrics = Metrics
+  { ReceiptTime,
+    #md_stats_msg {
+      send_time = SendTime,
+      collect_time = CollectTime,
+      prog_id = ProgId,
+      host = Host,
+      num_context = NumContexts,
+      context = Context,
+      num_metrics = NumMetrics,
+      metrics = Metrics
+    }
   }.
 
 metrics_from_lwes (Data) ->
@@ -281,6 +293,8 @@ num_metrics (#md_stats_msg { num_metrics = NumMetrics }) -> NumMetrics.
 metric_name (#md_metric { key = Name }) -> Name.
 metric_type (#md_metric { type = Type }) -> Type.
 metric_value (#md_metric { value = Value }) -> Value.
+new_metric (Type, Name, Value) ->
+  #md_metric { key = Name, type = Type, value = Value }.
 metric (#md_metric { key = Name, type = Type, value = Value }) ->
   { Type, Name, Value }.
 
@@ -346,8 +360,6 @@ statset_to_string (StatSet = #md_statset {}) ->
 
 num_or_empty (I) when is_integer (I) ->
   integer_to_list (I);
-num_or_empty (F) when is_float (F) ->
-  float_to_list (F);
 num_or_empty (_) ->
   "".
 
@@ -377,5 +389,250 @@ type_to_string (statset) -> <<"statset">>.
 -ifdef (TEST).
 -include_lib ("eunit/include/eunit.hrl").
 
+statsmsg_test_ () ->
+  [
+    { "basic constructor test",
+      fun() ->
+        C = [{<<"foo">>,<<"bar">>}],
+        MIn ={gauge, <<"baz">>, 5},
+        S = new (<<"program_id">>, C, [MIn]),
+        ?assertEqual (<<"program_id">>, prog_id(S)),
+        ?assertEqual (C, context(S)),
+        ?assertEqual (<<"bar">>, context_value (S, <<"foo">>)),
+        ?assertEqual (undefined, context_value (S, <<"bar">>)),
+        ?assertEqual (1, num_metrics (S)),
+        [ M = #md_metric {} ] = metrics (S),
+        ?assertEqual (MIn, metric (M)),
+        ?assertEqual (<<"baz">>, metric_name (M)),
+        ?assertEqual (gauge, metric_type (M)),
+        ?assertEqual (5, metric_value (M)),
+        % can't just assertEqual as things like timestamps are added
+        {0, SOut} =
+          from_lwes (
+              lwes_event:from_binary(lwes_event:to_binary(to_lwes(S)),dict)),
+        ?assertEqual (prog_id (S), prog_id (SOut)),
+        ?assertEqual (lists:sort(context(S)), lists:sort(context (SOut))),
+        ?assertEqual (lists:sort(metrics(S)), lists:sort(metrics (SOut)))
+      end
+    },
+    { "basic constructor metric test",
+      fun() ->
+        C = [{<<"foo">>,<<"bar">>}],
+        MIn = new_metric (gauge, <<"baz">>, 5),
+        S = new (<<"program_id">>, C, [MIn]),
+        ?assertEqual (<<"program_id">>, prog_id(S)),
+        ?assertEqual (C, context(S)),
+        ?assertEqual (<<"bar">>, context_value (S, <<"foo">>)),
+        ?assertEqual (undefined, context_value (S, <<"bar">>)),
+        ?assertEqual (1, num_metrics (S)),
+        [ M = #md_metric {} ] = metrics (S),
+        ?assertEqual ({gauge, <<"baz">>, 5}, metric (M)),
+        ?assertEqual (<<"baz">>, metric_name (M)),
+        ?assertEqual (gauge, metric_type (M)),
+        ?assertEqual (5, metric_value (M)),
+        % can't just assertEqual as things like timestamps are added
+        {0, SOut} =
+          from_lwes (
+              lwes_event:from_binary(lwes_event:to_binary(to_lwes(S)),dict)),
+        ?assertEqual (prog_id (S), prog_id (SOut)),
+        ?assertEqual (lists:sort(context(S)), lists:sort(context (SOut))),
+        ?assertEqual (lists:sort(metrics(S)), lists:sort(metrics (SOut)))
+      end
+    },
+    { "basic constructor multi-test",
+      fun() ->
+        C = [],
+        S = new (<<"program_id">>,
+                 [],
+                 [{counter, <<"bob">>, 10}, {gauge, <<"baz">>, 5}]),
+        ?assertEqual (<<"program_id">>, prog_id(S)),
+        ?assertEqual (C, context(S)),
+        ?assertEqual (2, num_metrics (S)),
+        [ M1 = #md_metric {}, M2 = #md_metric {} ] = metrics (S),
+        ?assertEqual (<<"baz">>, metric_name (M2)),
+        ?assertEqual (gauge, metric_type (M2)),
+        ?assertEqual (5, metric_value (M2)),
+        ?assertEqual (<<"bob">>, metric_name (M1)),
+        ?assertEqual (counter, metric_type (M1)),
+        ?assertEqual (10, metric_value (M1)),
+        % can't just assertEqual as things like timestamps are added
+        {0, SOut} =
+          from_lwes (
+              lwes_event:from_binary(lwes_event:to_binary(to_lwes(S)),dict)),
+        ?assertEqual (prog_id (S), prog_id (SOut)),
+        ?assertEqual (lists:sort(context(S)), lists:sort(context (SOut))),
+        ?assertEqual (lists:sort(metrics(S)), lists:sort(metrics (SOut))),
+        ?assertEqual (<<"unknown">>, host (SOut))
+      end
+    },
+    { "basic constructor host override",
+      fun() ->
+        C = [],
+        S = new (<<"program_id">>,
+                 [],
+                 [{counter, <<"bob">>, 10}, {gauge, <<"baz">>, 5}],
+                  <<"known">>),
+        ?assertEqual (<<"program_id">>, prog_id(S)),
+        ?assertEqual (C, context(S)),
+        ?assertEqual (2, num_metrics (S)),
+        [ M1 = #md_metric {}, M2 = #md_metric {} ] = metrics (S),
+        ?assertEqual (<<"baz">>, metric_name (M2)),
+        ?assertEqual (gauge, metric_type (M2)),
+        ?assertEqual (5, metric_value (M2)),
+        ?assertEqual (<<"bob">>, metric_name (M1)),
+        ?assertEqual (counter, metric_type (M1)),
+        ?assertEqual (10, metric_value (M1)),
+        % can't just assertEqual as things like timestamps are added
+        {0, SOut} =
+          from_lwes (
+              lwes_event:from_binary(lwes_event:to_binary(to_lwes(S)),dict)),
+        ?assertEqual (prog_id (S), prog_id (SOut)),
+        ?assertEqual (lists:sort(context(S)), lists:sort(context (SOut))),
+        ?assertEqual (lists:sort(metrics(S)), lists:sort(metrics (SOut))),
+        ?assertEqual (<<"known">>, host (SOut))
+      end
+    },
+    { "basic constructor host override/timestamp override",
+      fun() ->
+        C = [],
+        S = new (<<"program_id">>,
+                 C,
+                 [{counter, <<"bob">>, 10}, {gauge, <<"baz">>, 5}],
+                  <<"known">>,
+                 1234567
+                ),
+        ?assertEqual (<<"program_id">>, prog_id(S)),
+        ?assertEqual (C, context(S)),
+        ?assertEqual (2, num_metrics (S)),
+        [ M1 = #md_metric {}, M2 = #md_metric {} ] = metrics (S),
+        ?assertEqual (<<"baz">>, metric_name (M2)),
+        ?assertEqual (gauge, metric_type (M2)),
+        ?assertEqual (5, metric_value (M2)),
+        ?assertEqual (<<"bob">>, metric_name (M1)),
+        ?assertEqual (counter, metric_type (M1)),
+        ?assertEqual (10, metric_value (M1)),
+        % can't just assertEqual as things like timestamps are added
+        {0, SOut} =
+          from_lwes (
+              lwes_event:from_binary(lwes_event:to_binary(to_lwes(S)),dict)),
+        ?assertEqual (prog_id (S), prog_id (SOut)),
+        ?assertEqual (lists:sort(context(S)), lists:sort(context (SOut))),
+        ?assertEqual (lists:sort(metrics(S)), lists:sort(metrics (SOut))),
+        ?assertEqual (<<"known">>, host (SOut)),
+        ?assertEqual (1234567, collect_time (SOut))
+      end
+    },
+    { "statsets",
+      fun() ->
+        C = [],
+        SS = set_statset(count,5,
+               set_statset (sum, 10,
+                 set_statset (min, 1,
+                   set_statset (max, 3,
+                     set_statset (avg, 4,
+                       set_statset (median, 6,
+                         set_statset (pctl_75, 7,
+                           set_statset (pctl_90, 8,
+                             set_statset (pctl_95, 9,
+                               set_statset (pctl_98, 11,
+                                 set_statset (pctl_99, 12,
+                                              new_statset()))))))))))),
+        S = new (<<"program_id">>, C, [{statset, <<"foo">>, SS}]),
+        ?assertEqual (<<"program_id">>, prog_id(S)),
+        ?assertEqual (C, context(S)),
+        ?assertEqual (1, num_metrics (S)),
+        [ M ] = metrics (S),
+        ?assertEqual (<<"foo">>, metric_name (M)),
+        ?assertEqual (statset, metric_type (M)),
+        SO = metric_value (M),
+        ?assertEqual (SS, SO),
+        ?assertEqual (5,  get_statset (count,SO)),
+        ?assertEqual (10, get_statset (sum,SO)),
+        ?assertEqual (1,  get_statset (min,SO)),
+        ?assertEqual (3,  get_statset (max,SO)),
+        ?assertEqual (4,  get_statset (avg,SO)),
+        ?assertEqual (6,  get_statset (median,SO)),
+        ?assertEqual (7,  get_statset (pctl_75,SO)),
+        ?assertEqual (8,  get_statset (pctl_90,SO)),
+        ?assertEqual (9,  get_statset (pctl_95,SO)),
+        ?assertEqual (11, get_statset (pctl_98,SO)),
+        ?assertEqual (12, get_statset (pctl_99,SO)),
+        SL = statset_to_list (SO),
+        ?assertEqual ({count, 5}, lists:keyfind (count, 1, SL)),
+        ?assertEqual ({sum, 10}, lists:keyfind (sum, 1, SL)),
+        ?assertEqual ({min, 1}, lists:keyfind (min, 1, SL)),
+        ?assertEqual ({max, 3}, lists:keyfind (max, 1, SL)),
+        ?assertEqual ({avg, 4}, lists:keyfind (avg, 1, SL)),
+        ?assertEqual ({median, 6}, lists:keyfind (median, 1, SL)),
+        ?assertEqual ({pctl_75, 7}, lists:keyfind (pctl_75, 1, SL)),
+        ?assertEqual ({pctl_90, 8}, lists:keyfind (pctl_90, 1, SL)),
+        ?assertEqual ({pctl_95, 9}, lists:keyfind (pctl_95, 1, SL)),
+        ?assertEqual ({pctl_98, 11}, lists:keyfind (pctl_98, 1, SL)),
+        ?assertEqual ({pctl_99, 12}, lists:keyfind (pctl_99, 1, SL)),
+        % for coverage, use an incomplete statset
+        SL2 = statset_to_list (set_statset(count,5,new_statset())),
+        ?assertEqual ([{count, 5}], SL2),
+        % for coverage, check some boundary cases
+        % odd, that I allow a float
+        SS2S = list_to_binary (
+                 statset_to_string (set_statset(count,5,new_statset()))
+               ),
+        SS3 = statset_from_string (SS2S),
+        ?assertEqual ([{count, 5}], statset_to_list (SS3)),
+        % can't just assertEqual as things like timestamps are added
+        {0, SOut} =
+          from_lwes (
+              lwes_event:from_binary(lwes_event:to_binary(to_lwes(S)),dict)),
+        ?assertEqual (prog_id (S), prog_id (SOut)),
+        ?assertEqual (lists:sort(context(S)), lists:sort(context (SOut))),
+        ?assertEqual (lists:sort(metrics(S)), lists:sort(metrics (SOut)))
+      end
+    },
+    { "code coverage",
+      fun() ->
+        C = [{<<"foo">>,<<"bar">>}],
+        MIn ={gauge, <<"baz">>, 5},
+        S = new (<<"program_id">>, C, [MIn], <<"known">>, 5, 5),
+        ?assertEqual (5, send_time (S)),
+        % check adding extra contexts
+        SwC = add_context (S, <<"blah">>, <<"boo">>),
+        ?assertEqual (<<"boo">>, context_value (SwC, <<"blah">>)),
+        SwCL = add_contexts (S, [{<<"blah">>,<<"boo">>},{<<"aa">>,<<"zz">>}]),
+        ?assertEqual (<<"boo">>, context_value (SwCL, <<"blah">>)),
+        ?assertEqual (<<"zz">>, context_value (SwCL, <<"aa">>)),
+        % test that to_lwes of a list returns several events that are correct
+        [E1, E2] = to_lwes([S,S]),
+        {0, SOut1} =
+          from_lwes (lwes_event:from_binary(lwes_event:to_binary(E1),dict)),
+        {0, SOut2} =
+          from_lwes (lwes_event:from_binary(lwes_event:to_binary(E2),dict)),
+        ?assertEqual (SOut1, SOut2),
+        % test bad stat sets, as well as list to binary bit
+        ?assertEqual (undefined, statset_from_string ("::")),
+        ?assertEqual (gauge, string_to_type ("gauge")),
+        ?assertEqual (gauge, string_to_type (<<"gauge">>)),
+        NewEvent = E1#lwes_event {
+                     attrs = [{?LWES_INT_64, ?MD_RECEIPT_TIME, 5}
+                              | E1#lwes_event.attrs ]},
+        ?assertEqual ({5, S},
+          from_lwes(
+              lwes_event:from_binary(lwes_event:to_binary(NewEvent),dict))),
+        % hackery to test the cases where we don't have send_time
+        % or collect_time
+        S2 = new (<<"program_id">>, C, [MIn], <<"known">>),
+        E3 = to_lwes (S2),
+        NewEventMinusTimes = E3#lwes_event {
+                               attrs = lists:keydelete (?MD_SEND_TIME, 2,
+                                       lists:keydelete (?MD_COLLECT_TIME, 2,
+                                                        E3#lwes_event.attrs))
+                             },
+        ?assertEqual ({0, S2},
+                      from_lwes (
+                        lwes_event:from_binary(
+                          lwes_event:to_binary(NewEventMinusTimes),
+                          dict)))
+      end
+    }
+  ].
 
 -endif.
