@@ -48,7 +48,7 @@ context_find (Key, Context, Default) ->
   end.
 
 tags_from_lwes (Data) ->
-  Num = mondemand_util:find_in_dict (?MD_NUM, Data, 0),
+  Num = mondemand_util:find_in_dict (?MD_ANNOTATION_TAG_NUM, Data, 0),
   { Num,
     [ dict:fetch (annotation_tag_key (TagIndex), Data)
       || TagIndex <- lists:seq (1, Num)
@@ -90,15 +90,22 @@ to_lwes (#md_annotation_msg { id = Id,
 from_lwes (#lwes_event { attrs = Data}) ->
   {NumTags, Tags} = tags_from_lwes (Data),
   {_, NumContexts, Context} = mondemand_util:context_from_lwes (Data),
-  #md_annotation_msg {
-    id = dict:fetch (?MD_ANNOTATION_ID, Data),
-    timestamp = dict:fetch (?MD_ANNOTATION_TIMESTAMP, Data),
-    text = dict:fetch (?MD_ANNOTATION_TEXT, Data),
-    description = dict:fetch (?MD_ANNOTATION_DESCRIPTION, Data),
-    num_tags = NumTags,
-    tags = Tags,
-    num_context = NumContexts,
-    context = Context
+  ReceiptTime =
+    case dict:find (?MD_RECEIPT_TIME, Data) of
+      error -> 0;
+      {ok, RT} -> RT
+    end,
+  { ReceiptTime,
+    #md_annotation_msg {
+      id = dict:fetch (?MD_ANNOTATION_ID, Data),
+      timestamp = dict:fetch (?MD_ANNOTATION_TIMESTAMP, Data),
+      text = dict:fetch (?MD_ANNOTATION_TEXT, Data),
+      description = dict:fetch (?MD_ANNOTATION_DESCRIPTION, Data),
+      num_tags = NumTags,
+      tags = Tags,
+      num_context = NumContexts,
+      context = Context
+    }
   }.
 
 % Precompute tag keys

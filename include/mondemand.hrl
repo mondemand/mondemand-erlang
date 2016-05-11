@@ -72,9 +72,6 @@
 
 % record used internally for traced messages
 -record (md_trace_msg, { send_time,
-                         receipt_time,
-                         sender_ip,
-                         sender_port,
                          prog_id,
                          host,
                          trace_owner,
@@ -87,9 +84,6 @@
 -define (MD_LOG_EVENT,   <<"MonDemand::LogMsg">>).
 
 -record (md_log_msg, { send_time,
-                       receipt_time,
-                       sender_ip,
-                       sender_port,
                        prog_id,
                        host,
                        num_context = 0,
