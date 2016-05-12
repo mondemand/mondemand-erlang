@@ -1,328 +1,129 @@
-%% @author Anthony Molinaro <anthonym@alumni.caltech.edu>
-%%
-%% @doc Mondemand Stats functions
-%%
-%% This module wraps various records used by mondemand and provide
-%% the serialization/deserialization to lwes.
-%%
-%% It also provide an API which should allow easier process of metrics
-%% by the mondemand-server, for instance I'd want to do something like
-%%
-%%  Stats = mondemand_stats:from_lwes (Event),
-%%  Host = mondemand_stats:host (Stats),
-%%  Context = mondemand_stats:context (Stats),
-%%  Metrics = mondemand_stats:metrics (Stats),
-%%  lists:foldl (fun (Metric, A) ->
-%%                 MetricType = mondemand_stats:metric_type (Metric),
-%%                 MetricName = mondemand_stats:metric_name (Metric),
-%%                 MetricValue= mondemand_stats:metric_value(Metric)
-%%                 % do stuff here with everything above
-%%               end,
-%%               [],
-%%               Metrics)
-%%
+-module(stats_test).
 
--module (mondemand_statsmsg).
--include ("mondemand_internal.hrl").
--include_lib ("lwes/include/lwes.hrl").
-
--define(STATSET_SEP, <<":">>).
-
--export ([new/3,
-          new/4,
-          new/5,
-          new/6,
-          new_statset/0,
-          set_statset/3,
-          get_statset/2,
-          prog_id/1,
-          host/1,
-          collect_time/1,
-          send_time/1,
-          context/1,
-          context_value/2,
-          add_contexts/2,
-          add_context/3,
-          new_metric/3,
-          num_metrics/1,
-          metrics/1,
-          metric/1,
-          metric_type/1,
-          metric_name/1,
-          metric_value/1,
-          to_lwes/1,
-          from_lwes/1,
-          statset_from_string/1,
-          statset_to_list/1,
-          statset_to_string/1
+-export([
+         dict_based/1,
+         list_based/1,
+         mktuple_based/1,
+         pd_based/1
         ]).
+-include ("perf_common.hrl").
 
-% Context is of the form
-%   [ {Key, Value} ]
-% Metrics are of the form
-%   [ {Type, Key, Value } ]
-% for counters and gauges and
-%   [ {Type, Key, #statset{} } ]
-% for statsets
-new (ProgId, Context, Metrics) ->
-  Host = mondemand_config:host (),
-  new (ProgId, Context, Metrics, Host).
-new (ProgId, Context, Metrics, Host) ->
-  new (ProgId, Context, Metrics, Host, undefined).
-new (ProgId, Context, Metrics, Host, CollectTime) ->
-  new (ProgId, Context, Metrics, Host, CollectTime, undefined).
-new (ProgId, Context, Metrics = [{_,_,_}|_], Host, CollectTime, SendTime) ->
-  ValidatedMetrics = [ #md_metric { type = T, key = K, value = V }
-                       || { T, K, V }
-                       <- Metrics ],
-  new (ProgId, Context, ValidatedMetrics, Host, CollectTime, SendTime);
-new (ProgId, Context, Metrics = [#md_metric{}|_],
-     Host, CollectTime, SendTime) ->
-  #md_stats_msg { collect_time = CollectTime,
-                  send_time = SendTime,
-                  prog_id = ProgId,
-                  host = Host,
-                  num_context = length (Context),
-                  context = Context,
-                  num_metrics = length (Metrics),
-                  metrics = Metrics
-                }.
-
-new_statset () -> #md_statset {}.
-
-set_statset (count, Count, S = #md_statset{}) -> S#md_statset {count = Count};
-set_statset (sum, Sum, S = #md_statset{}) -> S#md_statset {sum = Sum};
-set_statset (min, Min, S = #md_statset{}) -> S#md_statset {min = Min};
-set_statset (max, Max, S = #md_statset{}) -> S#md_statset {max = Max};
-set_statset (avg, Avg, S = #md_statset{}) -> S#md_statset {avg = Avg};
-set_statset (median, Median, S = #md_statset{}) -> S#md_statset {median = Median};
-set_statset (pctl_75, Pctl75, S = #md_statset{}) -> S#md_statset {pctl_75 = Pctl75};
-set_statset (pctl_90, Pctl90, S = #md_statset{}) -> S#md_statset {pctl_90 = Pctl90};
-set_statset (pctl_95, Pctl95, S = #md_statset{}) -> S#md_statset {pctl_95 = Pctl95};
-set_statset (pctl_98, Pctl98, S = #md_statset{}) -> S#md_statset {pctl_98 = Pctl98};
-set_statset (pctl_99, Pctl99, S = #md_statset{}) -> S#md_statset {pctl_99 = Pctl99}.
-
-get_statset (count, S = #md_statset{}) -> S#md_statset.count;
-get_statset (sum, S = #md_statset{}) -> S#md_statset.sum;
-get_statset (min, S = #md_statset{}) -> S#md_statset.min;
-get_statset (max, S = #md_statset{}) -> S#md_statset.max;
-get_statset (avg, S = #md_statset{}) -> S#md_statset.avg;
-get_statset (median, S = #md_statset{}) -> S#md_statset.median;
-get_statset (pctl_75, S = #md_statset{}) -> S#md_statset.pctl_75;
-get_statset (pctl_90, S = #md_statset{}) -> S#md_statset.pctl_90;
-get_statset (pctl_95, S = #md_statset{}) -> S#md_statset.pctl_95;
-get_statset (pctl_98, S = #md_statset{}) -> S#md_statset.pctl_98;
-get_statset (pctl_99, S = #md_statset{}) -> S#md_statset.pctl_99.
-
--record(accum, { receipt_time,
-                 send_time,
-                 collect_time,
-                 prog_id,
-                 context_num = 0,
-                 context_keys = [],
-                 context_vals = [],
-                 metric_num = 0,
-                 metric_types = [],
-                 metric_keys = [],
-                 metric_vals = []
-               }).
-
-% the ESF for mondemand stats messages is as follows
-% MonDemand::StatsMsg
-% {
-%   string prog_id;    # program identifier
-%   int64  send_time;  # send time for stats in milliseconds since epoch
-%   int64  collect_time; # collect time for stats in milliseconds since epoch
-%   uint16 num;        # number of stats messages in this event
-%   string k0;         # name of the 0th counter
-%   string t0;         # type of the 0th counter
-%                      # (valid values are 'counter', 'gauge', or 'statset')
-%   int64  v0;         # value of the 0th counter if its a counter or gauge
-%   string v0;         # value of the 0th counter if it's a statset, the format
-%                      # of the string is
-%                      #  count:sum:min:max:avg:median:pctl_75:pctl_90:pctl_95:pctl_98:pctl_99
-%                      # if any are not calculated they can be left unset
-%
-%   # repeated for num entries
-%
-%   uint16 ctxt_num;   # number of contextual key/value dimensions
-%   string ctxt_k0;    # name of contextual metadata
-%   string ctxt_v0;    # value of contextual metadata
-%   # repeated for the number of contextual key/value pairs
-% }
-
-from_lwes (#lwes_event { attrs = Data}) ->
-  #accum { receipt_time = ReceiptTime,
-           send_time = SendTime,
-           collect_time = CollectTime,
-           prog_id = ProgramId,
-           context_num = _ContextNum,
-           context_keys = ContextKeys,
-           context_vals = ContextVals,
-           metric_num = MetricNum,
-           metric_types = MetricTypes,
-           metric_keys = MetricKeys,
-           metric_vals = MetricValues
-   } = process (Data,
-                undefined, % ReceiptTime
-                undefined, % SendTime
-                undefined, % CollectTime
-                undefined, % ProgramId
-                0,         % ContextNum
-                [],        % ContextKeys
-                [],        % ContextVals
-                0,         % MetricNum
-                [],        % MetricTypes
-                [],        % MetricKeys
-                []),        % MetricVals
-  MetricsTTuple = erlang:make_tuple (MetricNum, [], MetricTypes),
-  MetricsKTuple = erlang:make_tuple (MetricNum, [], MetricKeys),
-  MetricsVTuple = erlang:make_tuple (MetricNum, [], MetricValues),
-  Metrics =
-    [
-      begin
-        Type = element (N, MetricsTTuple),
-        Key = element (N, MetricsKTuple),
-        Value = element (N, MetricsVTuple),
-        #md_metric { type = Type,
-                     key = Key,
-                     value = case Type of
-                               statset -> statset_from_string (Value);
-                               _ -> Value
-                             end
-                   }
-      end
-      || N
-      <- lists:seq (1, MetricNum)
-    ],
-  {Host, Context} = zip_and_find_host (lists:sort(ContextKeys),
-                                       lists:sort(ContextVals),
-                                       <<"unknown">>,
-                                       []),
-  ContextNumOut = length (Context),
-
-  { case ReceiptTime =:= undefined of
-      true -> 0;
-      false -> ReceiptTime
-    end,
-    #md_stats_msg { send_time = SendTime,
-                    collect_time = CollectTime,
-                    prog_id = ProgramId,
-                    host = Host,
-                    num_context = ContextNumOut,
-                    context = Context,
-                    num_metrics = MetricNum,
-                    metrics = Metrics
-                  }
-  }.
-
-to_lwes (L) when is_list (L) ->
-  lists:map (fun to_lwes/1, L);
-
-to_lwes (#md_stats_msg { send_time = SendTimeIn,
-                         collect_time = CollectTimeIn,
-                         prog_id = ProgId,
-                         host = Host,
-                         num_context = NumContexts,
-                         context = Context,
-                         num_metrics = NumMetrics,
-                         metrics = Metrics
-                       }) ->
-  NowMillis = mondemand_util:millis_since_epoch(),
-  SendTime =
-    case SendTimeIn of
-      undefined -> NowMillis;
-      T -> T
-    end,
-  CollectTime =
-    case CollectTimeIn of
-      undefined -> NowMillis;
-      CT -> CT
-    end,
-  #lwes_event {
-    name  = ?MD_STATS_EVENT,
-    attrs = lists:flatten (
-              [ { ?LWES_STRING, ?MD_PROG_ID, ProgId },
-                { ?LWES_INT_64, ?MD_SEND_TIME, SendTime },
-                { ?LWES_INT_64, ?MD_COLLECT_TIME, CollectTime },
-                { ?LWES_U_INT_16, ?MD_NUM, NumMetrics },
-                lists:zipwith (fun metric_to_lwes/2,
-                               lists:seq (1, NumMetrics),
-                               Metrics),
-                mondemand_util:context_to_lwes (Host, NumContexts, Context)
-              ]
-            )
-  }.
-
-metric_to_lwes (MetricIndex,
-                #md_metric { key = Name, type = statset, value = Value }) ->
-  [ { ?LWES_STRING,
-      metric_name_key (MetricIndex),
-      mondemand_util:stringify (Name) },
-    { ?LWES_STRING,
-      metric_type_key (MetricIndex),
-      type_to_string (statset)
-    },
-    { ?LWES_STRING,
-      metric_value_key (MetricIndex),
-      statset_to_string (Value)
-    }
-  ];
-metric_to_lwes (MetricIndex,
-                #md_metric { key = Name, type = Type, value = Value }) ->
-  [ { ?LWES_STRING,
-      metric_name_key (MetricIndex),
-      mondemand_util:stringify (Name)
-    },
-    { ?LWES_STRING,
-      metric_type_key (MetricIndex),
-      type_to_string (Type)
-    },
-    { ?LWES_INT_64,
-      metric_value_key (MetricIndex),
-      Value
-    }
+functions () ->
+  [
+    {dict, fun dict_based/1},
+    {mktuple, fun mktuple_based/1},
+    {list, fun list_based/1},
+    {pd, fun pd_based/1}
   ].
 
-prog_id (#md_stats_msg { prog_id = ProgId }) -> ProgId.
-host (#md_stats_msg { host = Host }) -> Host.
-
-collect_time (#md_stats_msg { collect_time = CollectTime }) -> CollectTime.
-send_time (#md_stats_msg { send_time = SendTime }) -> SendTime.
-
-context (#md_stats_msg { context = Context }) -> Context.
-context_value (#md_stats_msg { context = Context }, ContextKey) ->
-  context_find (ContextKey, Context, undefined).
-
-context_find (Key, Context, Default) ->
-  case lists:keyfind (Key, 1, Context) of
-    false -> Default;
-    {_, H} -> H
+compare (U) ->
+  D = normalize (dict_based (U)),
+  L = normalize (list_based (U)),
+  P = normalize (pd_based (U)),
+  L2 = normalize (mktuple_based (U)),
+  case D =:= L andalso D =:= P andalso D =:= L2 of
+    true -> true;
+    false ->
+      io:format ("Dict    : ~p~n",[D]),
+      io:format ("List    : ~p~n",[L]),
+      io:format ("MkTuple : ~p~n",[L2]),
+      io:format ("PD      : ~p~n",[P]),
+      D =:= L andalso D =:= P andalso D =:= L2
   end.
 
-add_contexts (S = #md_stats_msg { num_context = ContextNum,
-                                  context = Context},
-              L) when is_list (L) ->
-  S#md_stats_msg { num_context = ContextNum + length (L),
-                   context = L ++ Context }.
+normalize (
+  #md_event { sender_ip = SenderIp,
+              sender_port = SenderPort,
+              receipt_time = ReceiptTime,
+              name = Name,
+              msg = #md_stats_msg {
+                      send_time = SendTime,
+                      collect_time = CollectTime,
+                      prog_id = ProgramId,
+                      host = Host,
+                      num_context = ContextNumOut,
+                      context = Context,
+                      num_metrics = MetricNum,
+                      metrics = Metrics
+                    }
+            }) ->
+  #md_event { sender_ip = SenderIp,
+              sender_port = SenderPort,
+              receipt_time = ReceiptTime,
+              name = Name,
+              msg = #md_stats_msg {
+                      send_time = SendTime,
+                      collect_time = CollectTime,
+                      prog_id = ProgramId,
+                      host = Host,
+                      num_context = ContextNumOut,
+                      context = lists:sort (Context),
+                      num_metrics = MetricNum,
+                      metrics = lists:sort (Metrics)
+                    }
+            }.
 
-add_context (S = #md_stats_msg { num_context = ContextNum,
-                                context = Context},
-             ContextKey, ContextValue) ->
-  S#md_stats_msg { num_context = ContextNum + 1,
-                   context = [ {ContextKey, ContextValue} | Context ] }.
 
-metrics (#md_stats_msg { metrics = Metrics }) -> Metrics.
-num_metrics (#md_stats_msg { num_metrics = NumMetrics }) -> NumMetrics.
 
-metric_name (#md_metric { key = Name }) -> Name.
-metric_type (#md_metric { type = Type }) -> Type.
-metric_value (#md_metric { value = Value }) -> Value.
-new_metric (Type, Name, Value) ->
-  #md_metric { key = Name, type = Type, value = Value }.
-metric (#md_metric { key = Name, type = Type, value = Value }) ->
-  { Type, Name, Value }.
+% copied from mondemand_event:from_lwes/1 and mondemand_statsmsg:from_lwes/1
+context_from_lwes (Data) ->
+  Num = mondemand_util:find_in_dict (?MD_CTXT_NUM, Data, 0),
+  { Host, Context } =
+    lists:foldl ( fun (N, {H, A}) ->
+                    K = dict:fetch (context_name_key (N), Data),
+                    V = dict:fetch (context_value_key (N), Data),
+                    case K of
+                      ?MD_HOST -> { V, A };
+                      _ -> { H, [ {K, V} | A ] }
+                    end
+                  end,
+                  { <<"unknown">>, [] },
+                  lists:seq (1,Num)
+                ),
+  { Host, length (Context), lists:keysort (1, Context) }.
 
+context_name_key (N) ->
+  ?ELEMENT_OF_TUPLE_LIST (N, ?MD_CTXT_K).
+
+context_value_key (N) ->
+  ?ELEMENT_OF_TUPLE_LIST (N, ?MD_CTXT_V).
+
+metric_name_key (N) ->
+  ?ELEMENT_OF_TUPLE_LIST (N, ?MD_STATS_K).
+
+metric_value_key (N) ->
+  ?ELEMENT_OF_TUPLE_LIST (N, ?MD_STATS_V).
+
+metric_type_key (N) ->
+  ?ELEMENT_OF_TUPLE_LIST (N, ?MD_STATS_T).
+
+string_to_type (L) when is_list(L) ->
+  string_to_type (list_to_binary (L));
+string_to_type (<<"gauge">>)   -> gauge;
+string_to_type (<<"counter">>) -> counter;
+string_to_type (<<"statset">>) -> statset.
+
+metrics_from_lwes (Data) ->
+  Num = mondemand_util:find_in_dict (?MD_NUM, Data, 0),
+  { Num,
+    lists:map (
+      fun (N) ->
+          K = dict:fetch (metric_name_key (N), Data),
+          V = dict:fetch (metric_value_key (N), Data),
+          T = string_to_type (dict:fetch (metric_type_key (N), Data)),
+          #md_metric { key = K,
+                       type = T,
+                       value = case T of
+                                 statset -> statset_from_string (V);
+                                 _ -> V
+                               end
+                  }
+      end,
+      lists:seq (1,Num)
+    )
+  }.
+
+-define(STATSET_SEP, <<":">>).
 statset_from_string (L) when is_list(L) ->
   statset_from_string (list_to_binary (L));
 statset_from_string (B) when is_binary(B) ->
@@ -346,66 +147,117 @@ statset_from_string (B) when is_binary(B) ->
       undefined
   end.
 
-statset_to_list (#md_statset {
-                   count = Count,
-                   sum = Sum,
-                   min = Min,
-                   max = Max,
-                   avg = Avg,
-                   median = Median,
-                   pctl_75 = Pctl75,
-                   pctl_90 = Pctl90,
-                   pctl_95 = Pctl95,
-                   pctl_98 = Pctl98,
-                   pctl_99 = Pctl99
-                 }) ->
-  add_if_defined (count, Count,
-    add_if_defined (sum, Sum,
-      add_if_defined (min, Min,
-        add_if_defined (max, Max,
-          add_if_defined (avg, Avg,
-            add_if_defined (median, Median,
-              add_if_defined (pctl_75, Pctl75,
-                add_if_defined (pctl_90, Pctl90,
-                  add_if_defined (pctl_95, Pctl95,
-                    add_if_defined (pctl_98, Pctl98,
-                      add_if_defined (pctl_99, Pctl99, [])
-                                   )))))))))).
+dict_based (Packet = {udp, _, SenderIp, SenderPort, _}) ->
+  Name = lwes_event:peek_name_from_udp (Packet),
+  #lwes_event { attrs = Data } = lwes_event:from_udp_packet (Packet, dict),
+  ReceiptTime = dict:fetch (?MD_RECEIPT_TIME, Data),
 
-add_if_defined (_, undefined, A) -> A;
-add_if_defined (K, V, A) -> [{K,V}|A].
+  % here's the name of the program which originated the metric
+  ProgId = dict:fetch (?MD_PROG_ID, Data),
+  SendTime =
+    case dict:find (?MD_SEND_TIME, Data) of
+      error -> undefined;
+      {ok, T} -> T
+    end,
+  CollectTime =
+    case dict:find (?MD_COLLECT_TIME, Data) of
+      error -> undefined;
+      {ok, CT} -> CT
+    end,
+  {Host, NumContexts, Context} = context_from_lwes (Data),
+  {NumMetrics, Metrics} = metrics_from_lwes (Data),
 
-statset_to_string (StatSet = #md_statset {}) ->
-  % somewhat dense, but basically take the record, turn it into a list
-  % strip off the tag, then turn entries into strings or empty string
-  % and join
-  mondemand_util:join (
-    lists:map (fun num_or_empty/1, tl (tuple_to_list (StatSet))),
-    ?STATSET_SEP).
+  Msg = #md_stats_msg {
+    send_time = SendTime,
+    collect_time = CollectTime,
+    prog_id = ProgId,
+    host = Host,
+    num_context = NumContexts,
+    context = Context,
+    num_metrics = NumMetrics,
+    metrics = Metrics
+  },
+  #md_event { sender_ip = SenderIp,
+              sender_port = SenderPort,
+              receipt_time = ReceiptTime,
+              name = Name,
+              msg = Msg }.
 
-num_or_empty (I) when is_integer (I) ->
-  integer_to_list (I);
-num_or_empty (_) ->
-  "".
+-record(accum, { receipt_time,
+                 send_time,
+                 collect_time,
+                 prog_id,
+                 context_num = 0,
+                 context_keys = [],
+                 context_vals = [],
+                 metric_num = 0,
+                 metric_types = [],
+                 metric_keys = [],
+                 metric_vals = []
+               }).
 
-metric_name_key (N) ->
-  ?ELEMENT_OF_TUPLE_LIST (N, ?MD_STATS_K).
+list_based (Packet = {udp, _, SenderIp, SenderPort, _}) ->
+  Name = lwes_event:peek_name_from_udp (Packet),
+  #lwes_event { attrs = Data } = lwes_event:from_udp_packet (Packet, list),
+  #accum { receipt_time = ReceiptTime,
+           send_time = SendTime,
+           collect_time = CollectTime,
+           prog_id = ProgramId,
+           context_num = _ContextNum,
+           context_keys = ContextKeys,
+           context_vals = ContextVals,
+           metric_num = MetricNum,
+           metric_types = MetricTypes,
+           metric_keys = MetricKeys,
+           metric_vals = MetricValues
+   } = process (Data,
+                undefined, % ReceiptTime
+                undefined, % SendTime
+                undefined, % CollectTime
+                undefined, % ProgramId
+                0,         % ContextNum
+                [],        % ContextKeys
+                [],        % ContextVals
+                0,         % MetricNum
+                [],        % MetricTypes
+                [],        % MetricKeys
+                []),        % MetricVals
+  Metrics =
+    lists:zipwith3 (fun ({K,Type},{K,Key},{K,Value}) ->
+                      #md_metric { key = Key,
+                                   type = case Type of
+                                            statset ->
+                                              statset_from_string (Value);
+                                            _ -> Value
+                                          end,
+                                   value = Value
+                                 }
+                    end,
+                    lists:sort(MetricTypes),
+                    lists:sort(MetricKeys),
+                    lists:sort(MetricValues)),
+  MetricNum = length (Metrics),
+  {Host, Context} = zip_and_find_host (lists:sort(ContextKeys),
+                                       lists:sort(ContextVals),
+                                       <<"unknown">>,
+                                       []),
+  ContextNumOut = length (Context),
 
-metric_value_key (N) ->
-  ?ELEMENT_OF_TUPLE_LIST (N, ?MD_STATS_V).
-
-metric_type_key (N) ->
-  ?ELEMENT_OF_TUPLE_LIST (N, ?MD_STATS_T).
-
-string_to_type (L) when is_list(L) ->
-  string_to_type (list_to_binary (L));
-string_to_type (<<"gauge">>)   -> gauge;
-string_to_type (<<"counter">>) -> counter;
-string_to_type (<<"statset">>) -> statset.
-
-type_to_string (gauge)   -> <<"gauge">>;
-type_to_string (counter) -> <<"counter">>;
-type_to_string (statset) -> <<"statset">>.
+  #md_event { sender_ip = SenderIp,
+              sender_port = SenderPort,
+              receipt_time = ReceiptTime,
+              name = Name,
+              msg = #md_stats_msg {
+                      send_time = SendTime,
+                      collect_time = CollectTime,
+                      prog_id = ProgramId,
+                      host = Host,
+                      num_context = ContextNumOut,
+                      context = Context,
+                      num_metrics = MetricNum,
+                      metrics = Metrics
+                    }
+            }.
 
 zip_and_find_host ([], [], Host, Context) ->
   { Host, Context };
@@ -576,7 +428,7 @@ process ([{<<"ctxt_k",N/binary>>,Key} | Rest ],
            CollectTime,
            ProgramId,
            ContextNum,
-           [ {index (N), Key} | ContextKeys],
+           [ {N, Key} | ContextKeys],
            ContextVals,
            MetricNum,
            MetricTypes,
@@ -601,7 +453,7 @@ process ([{<<"ctxt_v",N/binary>>,Val} | Rest ],
            ProgramId,
            ContextNum,
            ContextKeys,
-           [ {index (N), Val} | ContextVals],
+           [ {N, Val} | ContextVals],
            MetricNum,
            MetricTypes,
            MetricKeys,
@@ -651,7 +503,7 @@ process ([{<<"t",N/binary>>,Type} | Rest ],
            ContextKeys,
            ContextVals,
            MetricNum,
-           [ { index (N), string_to_type (Type) } | MetricTypes],
+           [ { N, string_to_type (Type) } | MetricTypes],
            MetricKeys,
            MetricVals);
 process ([{<<"k",N/binary>>,Key} | Rest ],
@@ -676,7 +528,7 @@ process ([{<<"k",N/binary>>,Key} | Rest ],
            ContextVals,
            MetricNum,
            MetricTypes,
-           [ {index (N), Key} | MetricKeys],
+           [ {N, Key} | MetricKeys],
            MetricVals);
 process ([{<<"v",N/binary>>, Val} | Rest ],
          ReceiptTime,
@@ -701,7 +553,7 @@ process ([{<<"v",N/binary>>, Val} | Rest ],
            MetricNum,
            MetricTypes,
            MetricKeys,
-           [ {index (N), Val} | MetricVals]);
+           [ {N, Val} | MetricVals]);
 process ([_ | Rest ],
          ReceiptTime,
          SendTime,
@@ -715,6 +567,452 @@ process ([_ | Rest ],
          MetricKeys,
          MetricVals) ->
   process (Rest,
+           ReceiptTime,
+           SendTime,
+           CollectTime,
+           ProgramId,
+           ContextNum,
+           ContextKeys,
+           ContextVals,
+           MetricNum,
+           MetricTypes,
+           MetricKeys,
+           MetricVals).
+
+pd_context (0, Host, Context) ->
+  {Host, Context};
+pd_context (N, MaybeHost, Context) ->
+  case get (context_name_key (N)) of
+    <<"host">> ->
+      pd_context (N - 1,
+                  get (context_value_key (N)),
+                  Context);
+    Name ->
+      pd_context (N - 1,
+                  MaybeHost,
+                  [{Name, get (context_value_key (N))} | Context ])
+  end.
+
+pd_metrics (0, Metrics) ->
+  Metrics;
+pd_metrics (N, Metrics) ->
+  pd_metrics (N-1,
+              [ begin
+                  Key = get (metric_name_key (N)),
+                  Type = string_to_type (get (metric_type_key (N))),
+                  Value = get (metric_value_key (N)),
+                  #md_metric { type = Type,
+                               key = Key,
+                               value = case Type of
+                                         statset -> statset_from_string (Value);
+                                         _ -> Value
+                                       end
+                             }
+                end | Metrics ]).
+
+pd_based (Packet = {udp, _, SenderIp, SenderPort, _}) ->
+  Name = lwes_event:peek_name_from_udp (Packet),
+  #lwes_event { attrs = Data } = lwes_event:from_udp_packet (Packet, list),
+  [ put (K, V) || {K,V} <- Data ],
+  % here's the name of the program which originated the metric
+  ProgId = get (?MD_PROG_ID),
+  SendTime = get (?MD_SEND_TIME),
+  CollectTime = get (?MD_COLLECT_TIME),
+  NumContextsRaw = get (<<"ctxt_num">>),
+  {Host, Context} = pd_context (NumContextsRaw, <<"unknown">>, []),
+  NumMetricsRaw = get (<<"num">>),
+  Metrics = pd_metrics (NumMetricsRaw, []),
+  ReceiptTime = get (<<"ReceiptTime">>),
+%  [ erase (K) || {K,_} <- Data ],
+  erase(),
+
+  Msg = #md_stats_msg {
+    send_time = SendTime,
+    collect_time = CollectTime,
+    prog_id = ProgId,
+    host = Host,
+    num_context = length (Context),
+    context = Context,
+    num_metrics = length (Metrics),
+    metrics = Metrics
+  },
+  #md_event { sender_ip = SenderIp,
+              sender_port = SenderPort,
+              receipt_time = ReceiptTime,
+              name = Name,
+              msg = Msg }.
+
+mktuple_based (Packet = {udp, _, SenderIp, SenderPort, _}) ->
+  Name = lwes_event:peek_name_from_udp (Packet),
+  #lwes_event { attrs = Data } = lwes_event:from_udp_packet (Packet, list),
+  #accum { receipt_time = ReceiptTime,
+           send_time = SendTime,
+           collect_time = CollectTime,
+           prog_id = ProgramId,
+           context_num = _ContextNum,
+           context_keys = ContextKeys,
+           context_vals = ContextVals,
+           metric_num = MetricNum,
+           metric_types = MetricTypes,
+           metric_keys = MetricKeys,
+           metric_vals = MetricValues
+   } = process2 (Data,
+                undefined, % ReceiptTime
+                undefined, % SendTime
+                undefined, % CollectTime
+                undefined, % ProgramId
+                0,         % ContextNum
+                [],        % ContextKeys
+                [],        % ContextVals
+                0,         % MetricNum
+                [],        % MetricTypes
+                [],        % MetricKeys
+                []),        % MetricVals
+  MetricsTTuple = erlang:make_tuple (MetricNum, [], MetricTypes),
+  MetricsKTuple = erlang:make_tuple (MetricNum, [], MetricKeys),
+  MetricsVTuple = erlang:make_tuple (MetricNum, [], MetricValues),
+  Metrics =
+    [
+      begin
+        Type = element (N, MetricsTTuple),
+        Key = element (N, MetricsKTuple),
+        Value = element (N, MetricsVTuple),
+        #md_metric { type = Type,
+                     key = Key,
+                     value = case Type of
+                               statset -> statset_from_string (Value);
+                               _ -> Value
+                             end
+                   }
+      end
+      || N
+      <- lists:seq (1, MetricNum)
+    ],
+  {Host, Context} = zip_and_find_host (lists:sort(ContextKeys),
+                                       lists:sort(ContextVals),
+                                       <<"unknown">>,
+                                       []),
+  ContextNumOut = length (Context),
+
+  #md_event { sender_ip = SenderIp,
+              sender_port = SenderPort,
+              receipt_time = ReceiptTime,
+              name = Name,
+              msg = #md_stats_msg {
+                      send_time = SendTime,
+                      collect_time = CollectTime,
+                      prog_id = ProgramId,
+                      host = Host,
+                      num_context = ContextNumOut,
+                      context = Context,
+                      num_metrics = MetricNum,
+                      metrics = Metrics
+                    }
+            }.
+
+
+
+process2 ([],
+         ReceiptTime,
+         SendTime,
+         CollectTime,
+         ProgramId,
+         ContextNum,
+         ContextKeys,
+         ContextVals,
+         MetricNum,
+         MetricTypes,
+         MetricKeys,
+         MetricVals) ->
+  #accum { receipt_time = ReceiptTime,
+           send_time = SendTime,
+           collect_time = CollectTime,
+           prog_id = ProgramId,
+           context_num = ContextNum,
+           context_keys = ContextKeys,
+           context_vals = ContextVals,
+           metric_num = MetricNum,
+           metric_types = MetricTypes,
+           metric_keys = MetricKeys,
+           metric_vals = MetricVals
+   };
+process2 ([{<<"ReceiptTime">>, R} | Rest],
+         _,
+         SendTime,
+         CollectTime,
+         ProgramId,
+         ContextNum,
+         ContextKeys,
+         ContextVals,
+         MetricNum,
+         MetricTypes,
+         MetricKeys,
+         MetricVals) ->
+  process2 (Rest,
+           R,
+           SendTime,
+           CollectTime,
+           ProgramId,
+           ContextNum,
+           ContextKeys,
+           ContextVals,
+           MetricNum,
+           MetricTypes,
+           MetricKeys,
+           MetricVals);
+process2 ([{<<"send_time">>, S} | Rest],
+         ReceiptTime,
+         _,
+         CollectTime,
+         ProgramId,
+         ContextNum,
+         ContextKeys,
+         ContextVals,
+         MetricNum,
+         MetricTypes,
+         MetricKeys,
+         MetricVals) ->
+  process2 (Rest,
+           ReceiptTime,
+           S,
+           CollectTime,
+           ProgramId,
+           ContextNum,
+           ContextKeys,
+           ContextVals,
+           MetricNum,
+           MetricTypes,
+           MetricKeys,
+           MetricVals);
+process2 ([{<<"collect_time">>, C} | Rest],
+         ReceiptTime,
+         SendTime,
+         _,
+         ProgramId,
+         ContextNum,
+         ContextKeys,
+         ContextVals,
+         MetricNum,
+         MetricTypes,
+         MetricKeys,
+         MetricVals) ->
+  process2 (Rest,
+           ReceiptTime,
+           SendTime,
+           C,
+           ProgramId,
+           ContextNum,
+           ContextKeys,
+           ContextVals,
+           MetricNum,
+           MetricTypes,
+           MetricKeys,
+           MetricVals);
+process2 ([{<<"prog_id">>, P} | Rest],
+         ReceiptTime,
+         SendTime,
+         CollectTime,
+         _,
+         ContextNum,
+         ContextKeys,
+         ContextVals,
+         MetricNum,
+         MetricTypes,
+         MetricKeys,
+         MetricVals) ->
+  process2 (Rest,
+           ReceiptTime,
+           SendTime,
+           CollectTime,
+           P,
+           ContextNum,
+           ContextKeys,
+           ContextVals,
+           MetricNum,
+           MetricTypes,
+           MetricKeys,
+           MetricVals);
+process2 ([{<<"ctxt_num">>, C} | Rest],
+         ReceiptTime,
+         SendTime,
+         CollectTime,
+         ProgramId,
+         _,
+         ContextKeys,
+         ContextVals,
+         MetricNum,
+         MetricTypes,
+         MetricKeys,
+         MetricVals) ->
+  process2 (Rest,
+           ReceiptTime,
+           SendTime,
+           CollectTime,
+           ProgramId,
+           C,
+           ContextKeys,
+           ContextVals,
+           MetricNum,
+           MetricTypes,
+           MetricKeys,
+           MetricVals);
+process2 ([{<<"ctxt_k",N/binary>>,Key} | Rest ],
+         ReceiptTime,
+         SendTime,
+         CollectTime,
+         ProgramId,
+         ContextNum,
+         ContextKeys,
+         ContextVals,
+         MetricNum,
+         MetricTypes,
+         MetricKeys,
+         MetricVals) ->
+  process2 (Rest,
+           ReceiptTime,
+           SendTime,
+           CollectTime,
+           ProgramId,
+           ContextNum,
+           [ {index (N), Key} | ContextKeys],
+           ContextVals,
+           MetricNum,
+           MetricTypes,
+           MetricKeys,
+           MetricVals);
+process2 ([{<<"ctxt_v",N/binary>>,Val} | Rest ],
+         ReceiptTime,
+         SendTime,
+         CollectTime,
+         ProgramId,
+         ContextNum,
+         ContextKeys,
+         ContextVals,
+         MetricNum,
+         MetricTypes,
+         MetricKeys,
+         MetricVals) ->
+  process2 (Rest,
+           ReceiptTime,
+           SendTime,
+           CollectTime,
+           ProgramId,
+           ContextNum,
+           ContextKeys,
+           [ {index (N), Val} | ContextVals],
+           MetricNum,
+           MetricTypes,
+           MetricKeys,
+           MetricVals);
+process2 ([{<<"num">>, N} | Rest],
+         ReceiptTime,
+         SendTime,
+         CollectTime,
+         ProgramId,
+         ContextNum,
+         ContextKeys,
+         ContextVals,
+         _,
+         MetricTypes,
+         MetricKeys,
+         MetricVals) ->
+  process2 (Rest,
+           ReceiptTime,
+           SendTime,
+           CollectTime,
+           ProgramId,
+           ContextNum,
+           ContextKeys,
+           ContextVals,
+           N,
+           MetricTypes,
+           MetricKeys,
+           MetricVals);
+process2 ([{<<"t",N/binary>>,Type} | Rest ],
+         ReceiptTime,
+         SendTime,
+         CollectTime,
+         ProgramId,
+         ContextNum,
+         ContextKeys,
+         ContextVals,
+         MetricNum,
+         MetricTypes,
+         MetricKeys,
+         MetricVals) ->
+  process2 (Rest,
+           ReceiptTime,
+           SendTime,
+           CollectTime,
+           ProgramId,
+           ContextNum,
+           ContextKeys,
+           ContextVals,
+           MetricNum,
+           [ { index (N), string_to_type (Type) } | MetricTypes],
+           MetricKeys,
+           MetricVals);
+process2 ([{<<"k",N/binary>>,Key} | Rest ],
+         ReceiptTime,
+         SendTime,
+         CollectTime,
+         ProgramId,
+         ContextNum,
+         ContextKeys,
+         ContextVals,
+         MetricNum,
+         MetricTypes,
+         MetricKeys,
+         MetricVals) ->
+  process2 (Rest,
+           ReceiptTime,
+           SendTime,
+           CollectTime,
+           ProgramId,
+           ContextNum,
+           ContextKeys,
+           ContextVals,
+           MetricNum,
+           MetricTypes,
+           [ {index (N), Key} | MetricKeys],
+           MetricVals);
+process2 ([{<<"v",N/binary>>, Val} | Rest ],
+         ReceiptTime,
+         SendTime,
+         CollectTime,
+         ProgramId,
+         ContextNum,
+         ContextKeys,
+         ContextVals,
+         MetricNum,
+         MetricTypes,
+         MetricKeys,
+         MetricVals) ->
+  process2 (Rest,
+           ReceiptTime,
+           SendTime,
+           CollectTime,
+           ProgramId,
+           ContextNum,
+           ContextKeys,
+           ContextVals,
+           MetricNum,
+           MetricTypes,
+           MetricKeys,
+           [ {index (N), Val} | MetricVals]);
+process2 ([_ | Rest ],
+         ReceiptTime,
+         SendTime,
+         CollectTime,
+         ProgramId,
+         ContextNum,
+         ContextKeys,
+         ContextVals,
+         MetricNum,
+         MetricTypes,
+         MetricKeys,
+         MetricVals) ->
+  process2 (Rest,
            ReceiptTime,
            SendTime,
            CollectTime,
@@ -1752,265 +2050,3 @@ index (<<"1021">>) -> 1022;
 index (<<"1022">>) -> 1023;
 index (<<"1023">>) -> 1024;
 index (<<"1024">>) -> 1025.
-
-%-=====================================================================-
-%-                            Test Functions                           -
-%-=====================================================================-
--ifdef (TEST).
--include_lib ("eunit/include/eunit.hrl").
-
-statsmsg_test_ () ->
-  [
-    { "basic constructor test",
-      fun() ->
-        C = [{<<"foo">>,<<"bar">>}],
-        MIn ={gauge, <<"baz">>, 5},
-        S = new (<<"program_id">>, C, [MIn]),
-        ?assertEqual (<<"program_id">>, prog_id(S)),
-        ?assertEqual (C, context(S)),
-        ?assertEqual (<<"bar">>, context_value (S, <<"foo">>)),
-        ?assertEqual (undefined, context_value (S, <<"bar">>)),
-        ?assertEqual (1, num_metrics (S)),
-        [ M = #md_metric {} ] = metrics (S),
-        ?assertEqual (MIn, metric (M)),
-        ?assertEqual (<<"baz">>, metric_name (M)),
-        ?assertEqual (gauge, metric_type (M)),
-        ?assertEqual (5, metric_value (M)),
-        % can't just assertEqual as things like timestamps are added
-        {0, SOut} =
-          from_lwes (
-              lwes_event:from_binary(lwes_event:to_binary(to_lwes(S)),list)),
-        ?assertEqual (prog_id (S), prog_id (SOut)),
-        ?assertEqual (lists:sort(context(S)), lists:sort(context (SOut))),
-        ?assertEqual (lists:sort(metrics(S)), lists:sort(metrics (SOut)))
-      end
-    },
-    { "basic constructor metric test",
-      fun() ->
-        C = [{<<"foo">>,<<"bar">>}],
-        MIn = new_metric (gauge, <<"baz">>, 5),
-        S = new (<<"program_id">>, C, [MIn]),
-        ?assertEqual (<<"program_id">>, prog_id(S)),
-        ?assertEqual (C, context(S)),
-        ?assertEqual (<<"bar">>, context_value (S, <<"foo">>)),
-        ?assertEqual (undefined, context_value (S, <<"bar">>)),
-        ?assertEqual (1, num_metrics (S)),
-        [ M = #md_metric {} ] = metrics (S),
-        ?assertEqual ({gauge, <<"baz">>, 5}, metric (M)),
-        ?assertEqual (<<"baz">>, metric_name (M)),
-        ?assertEqual (gauge, metric_type (M)),
-        ?assertEqual (5, metric_value (M)),
-        % can't just assertEqual as things like timestamps are added
-        {0, SOut} =
-          from_lwes (
-              lwes_event:from_binary(lwes_event:to_binary(to_lwes(S)),list)),
-        ?assertEqual (prog_id (S), prog_id (SOut)),
-        ?assertEqual (lists:sort(context(S)), lists:sort(context (SOut))),
-        ?assertEqual (lists:sort(metrics(S)), lists:sort(metrics (SOut)))
-      end
-    },
-    { "basic constructor multi-test",
-      fun() ->
-        C = [],
-        S = new (<<"program_id">>,
-                 [],
-                 [{counter, <<"bob">>, 10}, {gauge, <<"baz">>, 5}]),
-        ?assertEqual (<<"program_id">>, prog_id(S)),
-        ?assertEqual (C, context(S)),
-        ?assertEqual (2, num_metrics (S)),
-        [ M1 = #md_metric {}, M2 = #md_metric {} ] = metrics (S),
-        ?assertEqual (<<"baz">>, metric_name (M2)),
-        ?assertEqual (gauge, metric_type (M2)),
-        ?assertEqual (5, metric_value (M2)),
-        ?assertEqual (<<"bob">>, metric_name (M1)),
-        ?assertEqual (counter, metric_type (M1)),
-        ?assertEqual (10, metric_value (M1)),
-        % can't just assertEqual as things like timestamps are added
-        {0, SOut} =
-          from_lwes (
-              lwes_event:from_binary(lwes_event:to_binary(to_lwes(S)),list)),
-        ?assertEqual (prog_id (S), prog_id (SOut)),
-        ?assertEqual (lists:sort(context(S)), lists:sort(context (SOut))),
-        ?assertEqual (lists:sort(metrics(S)), lists:sort(metrics (SOut))),
-        ?assertEqual (<<"unknown">>, host (SOut))
-      end
-    },
-    { "basic constructor host override",
-      fun() ->
-        C = [],
-        S = new (<<"program_id">>,
-                 [],
-                 [{counter, <<"bob">>, 10}, {gauge, <<"baz">>, 5}],
-                  <<"known">>),
-        ?assertEqual (<<"program_id">>, prog_id(S)),
-        ?assertEqual (C, context(S)),
-        ?assertEqual (2, num_metrics (S)),
-        [ M1 = #md_metric {}, M2 = #md_metric {} ] = metrics (S),
-        ?assertEqual (<<"baz">>, metric_name (M2)),
-        ?assertEqual (gauge, metric_type (M2)),
-        ?assertEqual (5, metric_value (M2)),
-        ?assertEqual (<<"bob">>, metric_name (M1)),
-        ?assertEqual (counter, metric_type (M1)),
-        ?assertEqual (10, metric_value (M1)),
-        % can't just assertEqual as things like timestamps are added
-        {0, SOut} =
-          from_lwes (
-              lwes_event:from_binary(lwes_event:to_binary(to_lwes(S)),list)),
-        ?assertEqual (prog_id (S), prog_id (SOut)),
-        ?assertEqual (lists:sort(context(S)), lists:sort(context (SOut))),
-        ?assertEqual (lists:sort(metrics(S)), lists:sort(metrics (SOut))),
-        ?assertEqual (<<"known">>, host (SOut))
-      end
-    },
-    { "basic constructor host override/timestamp override",
-      fun() ->
-        C = [],
-        S = new (<<"program_id">>,
-                 C,
-                 [{counter, <<"bob">>, 10}, {gauge, <<"baz">>, 5}],
-                  <<"known">>,
-                 1234567
-                ),
-        ?assertEqual (<<"program_id">>, prog_id(S)),
-        ?assertEqual (C, context(S)),
-        ?assertEqual (2, num_metrics (S)),
-        [ M1 = #md_metric {}, M2 = #md_metric {} ] = metrics (S),
-        ?assertEqual (<<"baz">>, metric_name (M2)),
-        ?assertEqual (gauge, metric_type (M2)),
-        ?assertEqual (5, metric_value (M2)),
-        ?assertEqual (<<"bob">>, metric_name (M1)),
-        ?assertEqual (counter, metric_type (M1)),
-        ?assertEqual (10, metric_value (M1)),
-        % can't just assertEqual as things like timestamps are added
-        {0, SOut} =
-          from_lwes (
-              lwes_event:from_binary(lwes_event:to_binary(to_lwes(S)),list)),
-        ?assertEqual (prog_id (S), prog_id (SOut)),
-        ?assertEqual (lists:sort(context(S)), lists:sort(context (SOut))),
-        ?assertEqual (lists:sort(metrics(S)), lists:sort(metrics (SOut))),
-        ?assertEqual (<<"known">>, host (SOut)),
-        ?assertEqual (1234567, collect_time (SOut))
-      end
-    },
-    { "statsets",
-      fun() ->
-        C = [],
-        SS = set_statset(count,5,
-               set_statset (sum, 10,
-                 set_statset (min, 1,
-                   set_statset (max, 3,
-                     set_statset (avg, 4,
-                       set_statset (median, 6,
-                         set_statset (pctl_75, 7,
-                           set_statset (pctl_90, 8,
-                             set_statset (pctl_95, 9,
-                               set_statset (pctl_98, 11,
-                                 set_statset (pctl_99, 12,
-                                              new_statset()))))))))))),
-        S = new (<<"program_id">>, C, [{statset, <<"foo">>, SS}]),
-        ?assertEqual (<<"program_id">>, prog_id(S)),
-        ?assertEqual (C, context(S)),
-        ?assertEqual (1, num_metrics (S)),
-        [ M ] = metrics (S),
-        ?assertEqual (<<"foo">>, metric_name (M)),
-        ?assertEqual (statset, metric_type (M)),
-        SO = metric_value (M),
-        ?assertEqual (SS, SO),
-        ?assertEqual (5,  get_statset (count,SO)),
-        ?assertEqual (10, get_statset (sum,SO)),
-        ?assertEqual (1,  get_statset (min,SO)),
-        ?assertEqual (3,  get_statset (max,SO)),
-        ?assertEqual (4,  get_statset (avg,SO)),
-        ?assertEqual (6,  get_statset (median,SO)),
-        ?assertEqual (7,  get_statset (pctl_75,SO)),
-        ?assertEqual (8,  get_statset (pctl_90,SO)),
-        ?assertEqual (9,  get_statset (pctl_95,SO)),
-        ?assertEqual (11, get_statset (pctl_98,SO)),
-        ?assertEqual (12, get_statset (pctl_99,SO)),
-        SL = statset_to_list (SO),
-        ?assertEqual ({count, 5}, lists:keyfind (count, 1, SL)),
-        ?assertEqual ({sum, 10}, lists:keyfind (sum, 1, SL)),
-        ?assertEqual ({min, 1}, lists:keyfind (min, 1, SL)),
-        ?assertEqual ({max, 3}, lists:keyfind (max, 1, SL)),
-        ?assertEqual ({avg, 4}, lists:keyfind (avg, 1, SL)),
-        ?assertEqual ({median, 6}, lists:keyfind (median, 1, SL)),
-        ?assertEqual ({pctl_75, 7}, lists:keyfind (pctl_75, 1, SL)),
-        ?assertEqual ({pctl_90, 8}, lists:keyfind (pctl_90, 1, SL)),
-        ?assertEqual ({pctl_95, 9}, lists:keyfind (pctl_95, 1, SL)),
-        ?assertEqual ({pctl_98, 11}, lists:keyfind (pctl_98, 1, SL)),
-        ?assertEqual ({pctl_99, 12}, lists:keyfind (pctl_99, 1, SL)),
-        % for coverage, use an incomplete statset
-        SL2 = statset_to_list (set_statset(count,5,new_statset())),
-        ?assertEqual ([{count, 5}], SL2),
-        % for coverage, check some boundary cases
-        % odd, that I allow a float
-        SS2S = list_to_binary (
-                 statset_to_string (set_statset(count,5,new_statset()))
-               ),
-        SS3 = statset_from_string (SS2S),
-        ?assertEqual ([{count, 5}], statset_to_list (SS3)),
-        % can't just assertEqual as things like timestamps are added
-        {0, SOut} =
-          from_lwes (
-              lwes_event:from_binary(lwes_event:to_binary(to_lwes(S)),list)),
-        ?assertEqual (prog_id (S), prog_id (SOut)),
-        ?assertEqual (lists:sort(context(S)), lists:sort(context (SOut))),
-        ?assertEqual (lists:sort(metrics(S)), lists:sort(metrics (SOut)))
-      end
-    },
-    { "code coverage",
-      fun() ->
-        C = [{<<"foo">>,<<"bar">>}],
-        MIn ={gauge, <<"baz">>, 5},
-        S = new (<<"program_id">>, C, [MIn], <<"known">>, 5, 5),
-        ?assertEqual (5, send_time (S)),
-        % check adding extra contexts
-        SwC = add_context (S, <<"blah">>, <<"boo">>),
-        ?assertEqual (<<"boo">>, context_value (SwC, <<"blah">>)),
-        SwCL = add_contexts (S, [{<<"blah">>,<<"boo">>},{<<"aa">>,<<"zz">>}]),
-        ?assertEqual (<<"boo">>, context_value (SwCL, <<"blah">>)),
-        ?assertEqual (<<"zz">>, context_value (SwCL, <<"aa">>)),
-        % test that to_lwes of a list returns several events that are correct
-        [E1, E2] = to_lwes([S,S]),
-        {0, SOut1} =
-          from_lwes (lwes_event:from_binary(lwes_event:to_binary(E1),list)),
-        {0, SOut2} =
-          from_lwes (lwes_event:from_binary(lwes_event:to_binary(E2),list)),
-        ?assertEqual (SOut1, SOut2),
-        % test bad stat sets, as well as list to binary bit
-        ?assertEqual (undefined, statset_from_string ("::")),
-        ?assertEqual (gauge, string_to_type ("gauge")),
-        ?assertEqual (gauge, string_to_type (<<"gauge">>)),
-        NewEvent = E1#lwes_event {
-                     attrs = [{?LWES_INT_64, ?MD_RECEIPT_TIME, 5}
-                              | E1#lwes_event.attrs ]},
-        ?assertEqual ({5, S},
-          from_lwes(
-              lwes_event:from_binary(lwes_event:to_binary(NewEvent),list))),
-        % hackery to test the cases where we don't have send_time
-        % or collect_time
-        S2 = new (<<"program_id">>, C, [MIn], <<"known">>),
-        E3 = to_lwes (S2),
-        NewEventMinusTimes = E3#lwes_event {
-                               attrs = lists:keydelete (?MD_SEND_TIME, 2,
-                                       lists:keydelete (?MD_COLLECT_TIME, 2,
-                                                        E3#lwes_event.attrs))
-                             },
-        ?assertEqual ({0, S2},
-                      from_lwes (
-                        lwes_event:from_binary(
-                          lwes_event:to_binary(NewEventMinusTimes),
-                          list))),
-        R =
-        lists:foldl(fun(N,A) ->
-                      (N+1) =:= index (list_to_binary(integer_to_list(N)))
-                      andalso A
-                    end,
-                    true,
-                    lists:seq (0,1024)),
-        ?assertEqual (true, R)
-      end
-    }
-  ].
-
--endif.

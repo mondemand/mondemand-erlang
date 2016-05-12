@@ -1,6 +1,9 @@
 all:
 	@rebar get-deps compile
 
+perf:
+	@(cd tests ; erlc -I../src -I../include *.erl)
+
 edoc:
 	@rebar skip_deps=true doc
 

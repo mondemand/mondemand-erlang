@@ -1,3 +1,9 @@
+Version 6.0.0 (molinaro)
+  * significantly improved performance when deserializing stats events
+  * improved coverage of mondemand_statsmsg as well as mondemand_event
+  * removed some unused fields from currently unused records, but since they
+  were in the public header
+
 Version 5.8.0 (molinaro)
   * significantly improved performance when deserializing performance events
   * improved coverage of mondemand_perfmsg module

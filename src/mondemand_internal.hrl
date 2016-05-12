@@ -44,7 +44,7 @@
 -define (MD_STATS_MAX_METRIC_VALUE, 9223372036854775807).
 -define (MD_STATS_MIN_METRIC_VALUE, -9223372036854775808).
 
-% tokens in Mondemand::TraceMsg
+% tokens in MonDemand::TraceMsg
 -define (MD_TRACE_ID_KEY_BIN, <<"mondemand.trace_id">>).
 -define (MD_TRACE_ID_KEY_LIST, "mondemand.trace_id").
 -define (MD_TRACE_ID_KEY_ATOM, 'mondemand.trace_id').
@@ -55,7 +55,7 @@
 -define (MD_TRACE_SRC_HOST_KEY, <<"mondemand.src_host">>).
 -define (MD_TRACE_MESSAGE_KEY,  <<"mondemand.message">>).
 
-% tokens in Mondemand::LogMsg
+% tokens in MonDemand::LogMsg
 -define (MD_LOG_NUM, <<"num">>).
 -define (MD_LOG_FILE_PREFIX, <<"f">>).
 -define (MD_LOG_LINE_PREFIX, <<"l">>).
