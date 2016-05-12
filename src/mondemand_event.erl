@@ -102,7 +102,7 @@ from_udp (Packet = {udp, _, SenderIp, SenderPort, _}) ->
                   name = ?MD_PERF_EVENT,
                   msg = Msg };
     ?MD_STATS_EVENT ->
-      Event = lwes_event:from_udp_packet (Packet, dict),
+      Event = lwes_event:from_udp_packet (Packet, list),
       {ReceiptTime, Msg} = mondemand_statsmsg:from_lwes (Event),
       #md_event { sender_ip = SenderIp,
                   sender_port = SenderPort,

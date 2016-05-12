@@ -43,9 +43,6 @@ to_lwes (#md_trace_msg { send_time = SendTimeIn,
 from_lwes (#lwes_event { attrs = Data}) ->
   ProgId = dict:fetch (?MD_TRACE_PROG_ID_KEY, Data),
   Host = dict:fetch (?MD_TRACE_SRC_HOST_KEY, Data),
-  SenderIP = dict:fetch (?MD_SENDER_IP, Data),
-  SenderPort = dict:fetch (?MD_SENDER_PORT, Data),
-  ReceiptTime = dict:fetch (?MD_RECEIPT_TIME, Data),
   SendTime = mondemand_util:find_in_dict (?MD_SEND_TIME, Data),
   TraceId =
     mondemand_util:find_in_dict (?MD_TRACE_ID_KEY_BIN, Data, <<"unknown">>),
@@ -56,9 +53,6 @@ from_lwes (#lwes_event { attrs = Data}) ->
 
   #md_trace_msg {
     send_time = SendTime,
-    receipt_time = ReceiptTime,
-    sender_ip = SenderIP,
-    sender_port = SenderPort,
     prog_id = ProgId,
     host = Host,
     trace_owner = TraceOwner,
