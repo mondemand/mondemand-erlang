@@ -194,6 +194,36 @@ send_trace (ProgId, Message, Context) ->
       end
   end.
 
+-type trace_key() :: binary() | iolist() | atom().
+-type trace_dict() :: term(). %% Could be dict() or dict:dict().
+%% @doc Emits a trace event to the mondemand trace server.  These trace events
+%% may be viewed in the trace interface of the
+%% <a href="https://github.com/mondemand/mondemand-server">mondemand server</a>.
+%%
+%% The trace event is characterized by five attributes.
+%%
+%% A trace usually contains multiple related events that are all due to a
+%% single request.  The `Owner' and `TraceId' identify the request, and are
+%% used by the mondemand server's trace interface to select which messages to
+%% view.
+%%
+%% The `ProgId' identifies the source of the trace message, and is useful when
+%% a trace contains messages from several components.
+%%
+%% The `Message' is a short string that contains the main information of the
+%% trace event.
+%%
+%% The `Context' is either a dict or a list of additional key/value pairs that
+%% provide additional information about the message.  Mondemand's trace
+%% interface attempts to interpret each context values as JSON if possible and
+%% will display them in a structured way if successful.
+%%
+%% `send_trace' is very liberal about the values it accepts, and accepts both
+%% iodata and atom for its arguments.
+%%
+-spec send_trace(ProgId::trace_key(), Owner::trace_key(), TraceId::trace_key(), Message::trace_key(), Context) -> 'ok'
+        when Context :: list({Key::trace_key(), Value::trace_key()}) | trace_dict().
+
 send_trace (ProgId, Owner, TraceId, Message, Context) ->
   case Context of
     List when is_list (Context) ->
