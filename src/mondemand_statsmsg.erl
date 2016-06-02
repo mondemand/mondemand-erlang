@@ -217,7 +217,12 @@ from_lwes (#lwes_event { attrs = Data}) ->
   }.
 
 to_lwes (L) when is_list (L) ->
-  lists:map (fun to_lwes/1, L);
+  lists:flatten (lists:map (fun to_lwes/1, L) );
+
+% split events into chunks of MD_MAX_METRICS
+to_lwes (MondemandStatsMsg = #md_stats_msg { num_metrics = NumMetrics })
+  when NumMetrics > ?MD_MAX_METRICS ->
+  lists:reverse (to_lwes( MondemandStatsMsg, []));
 
 to_lwes (#md_stats_msg { send_time = SendTimeIn,
                          collect_time = CollectTimeIn,
@@ -253,6 +258,23 @@ to_lwes (#md_stats_msg { send_time = SendTimeIn,
               ]
             )
   }.
+
+to_lwes (MondemandStatsMsg = #md_stats_msg {
+                         num_metrics = NumMetrics,
+                         metrics = Metrics
+                       }, EventList)
+  when NumMetrics > ?MD_MAX_METRICS ->
+  { HeadMetrics, TailMetrics } = lists:split (?MD_MAX_METRICS, Metrics),
+  to_lwes (MondemandStatsMsg#md_stats_msg {
+                              num_metrics = length (TailMetrics),
+                              metrics = TailMetrics },
+           [ to_lwes (MondemandStatsMsg#md_stats_msg {
+                                         num_metrics = ?MD_MAX_METRICS,
+                                         metrics = HeadMetrics})
+              | EventList ]);
+
+to_lwes (MondemandStatsMsg = #md_stats_msg {}, EventList) ->
+  [ to_lwes (MondemandStatsMsg) | EventList ].
 
 metric_to_lwes (MetricIndex,
                 #md_metric { key = Name, type = statset, value = Value }) ->
@@ -2009,6 +2031,48 @@ statsmsg_test_ () ->
                     true,
                     lists:seq (0,1024)),
         ?assertEqual (true, R)
+      end
+    },
+    { "many metrics",
+      fun() ->
+        C = [{<<"foo">>,<<"bar">>}],
+        MetricsCount = ?MD_MAX_METRICS + 1,
+        E2K0Name = list_to_binary(string:concat("baz", integer_to_list(MetricsCount))),
+        MIn = lists:map(fun(X) ->
+                          {
+                            gauge,
+                            list_to_binary(string:concat("baz", integer_to_list(X))),
+                            X
+                          } end,
+                        lists:seq(1, MetricsCount)),
+        S = new (<<"program_id">>, C, MIn, <<"known">>, 5, 5),
+        ?assertEqual (5, send_time (S)),
+        % check adding extra contexts
+        SwC = add_context (S, <<"blah">>, <<"boo">>),
+        ?assertEqual (<<"boo">>, context_value (SwC, <<"blah">>)),
+        SwCL = add_contexts (S, [{<<"blah">>,<<"boo">>},{<<"aa">>,<<"zz">>}]),
+        ?assertEqual (<<"boo">>, context_value (SwCL, <<"blah">>)),
+        ?assertEqual (<<"zz">>, context_value (SwCL, <<"aa">>)),
+        % test that to_lwes of long statsmsg  returns several events that are correct
+        [E1, E2] = to_lwes(S),
+        % test that the metric counts and first metric in events match expected values
+        ?assert (lists:member({?LWES_U_INT_16, <<"num">>, ?MD_MAX_METRICS}, E1#lwes_event.attrs)),
+        ?assert (lists:member({?LWES_STRING, <<"k0">>, <<"baz1">>}, E1#lwes_event.attrs)),
+        ?assert (lists:member({?LWES_STRING, <<"t0">>, <<"gauge">>}, E1#lwes_event.attrs)),
+        ?assert (lists:member({?LWES_INT_64, <<"v0">>, 1}, E1#lwes_event.attrs)),
+        ?assert (lists:member({?LWES_U_INT_16, <<"num">>, 1}, E2#lwes_event.attrs)),
+        ?assert (lists:member({?LWES_STRING, <<"k0">>, E2K0Name}, E2#lwes_event.attrs)),
+        ?assert (lists:member({?LWES_STRING, <<"t0">>, <<"gauge">>}, E2#lwes_event.attrs)),
+        ?assert (lists:member({?LWES_INT_64, <<"v0">>, MetricsCount}, E2#lwes_event.attrs)),
+        % test that the prog_id and contexts match in the two lwes events
+        {0, S1} =
+          from_lwes (
+              lwes_event:from_binary(lwes_event:to_binary(E1),list)),
+        {0, S2} =
+          from_lwes (
+              lwes_event:from_binary(lwes_event:to_binary(E2),list)),
+        ?assertEqual (prog_id (S1), prog_id (S2)),
+        ?assertEqual (lists:sort(context(S1)), lists:sort(context (S2)))
       end
     }
   ].
