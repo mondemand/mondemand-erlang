@@ -1,3 +1,6 @@
+Version 6.1.0 (whalen)
+  * when sending stats emit multiple lwes events when num_metrics is large
+
 Version 6.0.0 (molinaro)
   * significantly improved performance when deserializing stats events
   * improved coverage of mondemand_statsmsg as well as mondemand_event

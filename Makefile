@@ -10,7 +10,7 @@ edoc:
 check:
 	@rm -rf .eunit
 	@mkdir -p .eunit
-	@dialyzer --src src
+	@dialyzer --src src -I deps -pa deps/parse_trans/ebin
 	@rebar skip_deps=true eunit
 
 clean:

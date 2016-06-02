@@ -39,6 +39,7 @@
 
 % related to stats messages
 -define (MD_STATS_EVENT, <<"MonDemand::StatsMsg">>).
+-define (MD_MAX_METRICS, 1024).
 
 % internal records for MonDemand::StatsMsg
 -record (md_stats_msg, { send_time,
