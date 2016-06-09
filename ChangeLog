@@ -1,3 +1,7 @@
+Version 6.2.0 (molinaro)
+  * added a function to convert from millis since epoch to erlang:now/0
+  format
+
 Version 6.1.0 (whalen)
   * when sending stats emit multiple lwes events when num_metrics is large
 
