@@ -29,6 +29,7 @@
           seconds_since_epoch/0,
           minutes_since_epoch/0,
           micros_epoch_to_erlang_now/1, % (MicrosTimeSinceEpoch) -> {_,_,_}
+          millis_epoch_to_erlang_now/1, % (MillisSinceEpoch) -> {_,_,}
           now_to_mdyhms/1,              % ({_,_,_}) -> {{_,_,_},{_,_,_}}
           now_to_epoch_millis/1,        % ({_,_,_}) -> MillisSinceEpoch
           now_to_epoch_secs/1,          % ({_,_,_}) -> SecondsSinceEpoch
@@ -133,6 +134,14 @@ micros_epoch_to_erlang_now (Ts) ->
   TempRes = Ts - Mega * ?TERA,
   Sec = TempRes div ?MEGA,
   Micro = TempRes - Sec * ?MEGA,
+  {Mega, Sec, Micro}.
+
+millis_epoch_to_erlang_now (Ts) ->
+  Mega = Ts div ?GIGA, % since we are in millis we div by GIGA here
+  TempRes = Ts - Mega * ?GIGA,
+  Sec = TempRes div ?KILO,
+  % take left over milliseconds and multiply by KILO to get micros
+  Micro = (TempRes - Sec * ?KILO) * ?KILO,
   {Mega, Sec, Micro}.
 
 now_to_mdyhms (Now = {_, _, _}) ->
