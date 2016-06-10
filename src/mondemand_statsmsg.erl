@@ -217,12 +217,17 @@ from_lwes (#lwes_event { attrs = Data}) ->
   }.
 
 to_lwes (L) when is_list (L) ->
-  lists:flatten (lists:map (fun to_lwes/1, L) );
+  MaxMetrics = mondemand_config:max_metrics (),
+  lists:flatten (lists:map (fun (X) -> to_lwes (X, MaxMetrics) end, L) );
 
-% split events into chunks of MD_MAX_METRICS
-to_lwes (MondemandStatsMsg = #md_stats_msg { num_metrics = NumMetrics })
-  when NumMetrics > ?MD_MAX_METRICS ->
-  lists:reverse (to_lwes( MondemandStatsMsg, []));
+to_lwes (MondemandStatsMsg = #md_stats_msg {}) ->
+  MaxMetrics = mondemand_config:max_metrics (),
+  to_lwes (MondemandStatsMsg, MaxMetrics).
+
+% split events into chunks of max_metrics
+to_lwes (MondemandStatsMsg = #md_stats_msg { num_metrics = NumMetrics }, MaxMetrics)
+  when NumMetrics > MaxMetrics  ->
+  lists:reverse (to_lwes( MondemandStatsMsg, MaxMetrics, []));
 
 to_lwes (#md_stats_msg { send_time = SendTimeIn,
                          collect_time = CollectTimeIn,
@@ -232,7 +237,7 @@ to_lwes (#md_stats_msg { send_time = SendTimeIn,
                          context = Context,
                          num_metrics = NumMetrics,
                          metrics = Metrics
-                       }) ->
+                       }, _) ->
   NowMillis = mondemand_util:millis_since_epoch(),
   SendTime =
     case SendTimeIn of
@@ -262,18 +267,19 @@ to_lwes (#md_stats_msg { send_time = SendTimeIn,
 to_lwes (MondemandStatsMsg = #md_stats_msg {
                          num_metrics = NumMetrics,
                          metrics = Metrics
-                       }, EventList)
-  when NumMetrics > ?MD_MAX_METRICS ->
-  { HeadMetrics, TailMetrics } = lists:split (?MD_MAX_METRICS, Metrics),
+                       }, MaxMetrics, EventList)
+  when NumMetrics > MaxMetrics ->
+  { HeadMetrics, TailMetrics } = lists:split (MaxMetrics, Metrics),
   to_lwes (MondemandStatsMsg#md_stats_msg {
                               num_metrics = length (TailMetrics),
                               metrics = TailMetrics },
+           MaxMetrics,
            [ to_lwes (MondemandStatsMsg#md_stats_msg {
-                                         num_metrics = ?MD_MAX_METRICS,
+                                         num_metrics = MaxMetrics,
                                          metrics = HeadMetrics})
               | EventList ]);
 
-to_lwes (MondemandStatsMsg = #md_stats_msg {}, EventList) ->
+to_lwes (MondemandStatsMsg = #md_stats_msg {}, _, EventList) ->
   [ to_lwes (MondemandStatsMsg) | EventList ].
 
 metric_to_lwes (MetricIndex,
@@ -2035,8 +2041,10 @@ statsmsg_test_ () ->
     },
     { "many metrics",
       fun() ->
+        mondemand_config:init(),
         C = [{<<"foo">>,<<"bar">>}],
-        MetricsCount = ?MD_MAX_METRICS + 1,
+        MaxMetrics = mondemand_config:max_metrics (),
+        MetricsCount = MaxMetrics + 1,
         E2K0Name = list_to_binary(string:concat("baz", integer_to_list(MetricsCount))),
         MIn = lists:map(fun(X) ->
                           {
@@ -2056,7 +2064,7 @@ statsmsg_test_ () ->
         % test that to_lwes of long statsmsg  returns several events that are correct
         [E1, E2] = to_lwes(S),
         % test that the metric counts and first metric in events match expected values
-        ?assert (lists:member({?LWES_U_INT_16, <<"num">>, ?MD_MAX_METRICS}, E1#lwes_event.attrs)),
+        ?assert (lists:member({?LWES_U_INT_16, <<"num">>, MaxMetrics}, E1#lwes_event.attrs)),
         ?assert (lists:member({?LWES_STRING, <<"k0">>, <<"baz1">>}, E1#lwes_event.attrs)),
         ?assert (lists:member({?LWES_STRING, <<"t0">>, <<"gauge">>}, E1#lwes_event.attrs)),
         ?assert (lists:member({?LWES_INT_64, <<"v0">>, 1}, E1#lwes_event.attrs)),

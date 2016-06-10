@@ -23,6 +23,7 @@
            default_stats/0,
            lwes_config/0,
            minutes_to_keep/0,
+           max_metrics/0,
            parse_config/1
          ]).
 
@@ -30,6 +31,8 @@
 -define (DEFAULT_STATS, [min, max, sum, count]).
 -define (DEFAULT_MINUTES_TO_KEEP, 10).
 -define (MOCHI_SENDER_HOST, mondemand_sender_host_global).
+-define (MOCHI_MAX_METRICS, mondemand_max_metrics_global).
+-define (DEFAULT_MAX_METRICS, 512).
 
 % this function is meant to be called before the supervisor and
 % pulls all those configs which are mostly static.
@@ -39,7 +42,13 @@ init () ->
       undefined -> net_adm:localhost();
       {ok, H} -> H
     end,
-  mondemand_global:put (?MOCHI_SENDER_HOST, Host).
+  mondemand_global:put (?MOCHI_SENDER_HOST, Host),
+  MaxMetrics =
+    case application:get_env (mondemand, max_metrics) of
+      undefined -> ?DEFAULT_MAX_METRICS;
+      {ok, M} -> M
+    end,
+  mondemand_global:put (?MOCHI_MAX_METRICS, MaxMetrics).
 
 host () ->
   mondemand_global:get (?MOCHI_SENDER_HOST).
@@ -236,6 +245,9 @@ minutes_to_keep () ->
     undefined -> ?DEFAULT_MINUTES_TO_KEEP;
     {ok, I} when is_integer (I) -> I
   end.
+
+max_metrics () ->
+ mondemand_global:get (?MOCHI_MAX_METRICS).
 
 %%--------------------------------------------------------------------
 %%% Test functions
