@@ -1,3 +1,6 @@
+Version 6.2.1 (whalen)
+  * moved max_metrics constant to mondemand_config so we can tweak at runtime
+
 Version 6.2.0 (molinaro)
   * added a function to convert from millis since epoch to erlang:now/0
   format
