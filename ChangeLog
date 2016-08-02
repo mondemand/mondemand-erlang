@@ -1,3 +1,9 @@
+Version 6.3.0 (molinaro)
+  * fix median calculation where there is only one sample (since this is
+    ill defined, it will be set to zero)
+  * add fetch_sample_set/4 to allow fetching a sample set from a previous
+    minute
+
 Version 6.2.1 (whalen)
   * moved max_metrics constant to mondemand_config so we can tweak at runtime
 
