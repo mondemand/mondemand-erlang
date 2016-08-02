@@ -16,5 +16,4 @@ exec erl \
   -pa ebin \
   -config mondemand_dev.config \
   $extra \
-  -s reloader \
   -s mondemand_app

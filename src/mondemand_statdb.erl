@@ -79,6 +79,7 @@
           add_sample/4,
           fetch_sample_set/2,
           fetch_sample_set/3,
+          fetch_sample_set/4,
           remove_sample_set/2,
           remove_sample_set/3,
 
@@ -403,8 +404,11 @@ fetch_sample_set (ProgId, Key) ->
   fetch_sample_set (ProgId, Key, []).
 
 fetch_sample_set (ProgId, Key, Context) ->
+  fetch_sample_set (ProgId, Key, Context, mondemand_util:current_minute()).
+
+fetch_sample_set (ProgId, Key, Context, Minute) ->
   InternalKey = calculate_key (ProgId, Context, statset, Key),
-  Table = minute_tab (mondemand_util:current_minute()),
+  Table = minute_tab (Minute),
   return_if_exists (InternalKey, Table).
 
 remove_sample_set (ProgId, Key) ->
@@ -818,9 +822,9 @@ stats_to_statset (median,
   { Count, Sum, SamplesCount, ScaledCount, Sorted,
     mondemand_statsmsg:set_statset (
       median,
-      case ScaledCount > 0 of  % avoid badarg
-        true -> element (trunc (ScaledCount*0.50), Sorted);
-        false -> 0
+      case trunc (ScaledCount*0.50) of  % avoid badarg
+        N when N > 0 -> element (N, Sorted);
+        _ -> 0
       end,
       StatSet) };
 stats_to_statset (pctl_75,
@@ -1047,7 +1051,42 @@ config_perf_test_ () ->
         Max = mondemand_statsmsg:get_statset (max, SS),
         ?assertEqual (true, Max > 1)
       end,
-      ?_assertEqual (true, remove_sample_set (my_prog1, my_metric1))
+      ?_assertEqual (true, remove_sample_set (my_prog1, my_metric1)),
+      fun () ->
+        ok = create_sample_set(foo,bar,[],"",100, all_sample_set_stats()),
+        SS = fetch_sample_set(foo,bar,[]),
+        [ ?assertEqual (0, mondemand_statsmsg:get_statset (S, SS))
+          || S <- all_sample_set_stats() ],
+
+        % turns out there was a bug with median when there was only one
+        % element in the set, so add one, then check the values are as
+        % we expect
+        mondemand_statdb:add_sample(foo,bar,[],10),
+        SS1 = fetch_sample_set(foo,bar,[]),
+        [ ?assertEqual (10, mondemand_statsmsg:get_statset (S, SS1))
+          || S <- all_sample_set_stats (), S =/= count, S =/= median ],
+        ?assertEqual (1, mondemand_statsmsg:get_statset (count, SS1)),
+        ?assertEqual (0, mondemand_statsmsg:get_statset (median, SS1)),
+        mondemand_statdb:remove_sample_set(foo,bar,[]),
+
+        % then for completeness just check that all the values are what
+        % we would expect for 100 samples
+        ok = create_sample_set(foo,bar,[],"",100, all_sample_set_stats()),
+        [ add_sample (foo,bar,[],N) || N <- lists:seq(1,100) ],
+        SS2 = fetch_sample_set(foo,bar,[]),
+        ?assertEqual (100,mondemand_statsmsg:get_statset (count, SS2)),
+        ?assertEqual (5050,mondemand_statsmsg:get_statset (sum, SS2)),
+        ?assertEqual (1,mondemand_statsmsg:get_statset (min, SS2)),
+        ?assertEqual (100,mondemand_statsmsg:get_statset (max, SS2)),
+        ?assertEqual (50,mondemand_statsmsg:get_statset (avg, SS2)),
+        ?assertEqual (50,mondemand_statsmsg:get_statset (median, SS2)),
+        ?assertEqual (75,mondemand_statsmsg:get_statset (pctl_75, SS2)),
+        ?assertEqual (90,mondemand_statsmsg:get_statset (pctl_90, SS2)),
+        ?assertEqual (95,mondemand_statsmsg:get_statset (pctl_95, SS2)),
+        ?assertEqual (98,mondemand_statsmsg:get_statset (pctl_98, SS2)),
+        ?assertEqual (99,mondemand_statsmsg:get_statset (pctl_99, SS2)),
+        mondemand_statdb:remove_sample_set(foo,bar,[])
+      end
     ]
   }.
 
