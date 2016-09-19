@@ -1,3 +1,7 @@
+Version 6.4.0 (molinaro)
+  * now able to post traces over 65kb
+  * updated the version of lwes dependency
+
 Version 6.3.0 (molinaro)
   * fix median calculation where there is only one sample (since this is
     ill defined, it will be set to zero)

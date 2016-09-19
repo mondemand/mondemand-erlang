@@ -24,7 +24,8 @@
            lwes_config/0,
            minutes_to_keep/0,
            max_metrics/0,
-           parse_config/1
+           parse_config/1,
+           get_http_config/0
          ]).
 
 -define (DEFAULT_MAX_SAMPLE_SIZE, 10).
@@ -248,6 +249,28 @@ minutes_to_keep () ->
 
 max_metrics () ->
  mondemand_global:get (?MOCHI_MAX_METRICS).
+
+get_http_config () ->
+  case application:get_env (mondemand, http_endpoint) of
+    {ok, HttpConfig} ->
+      HttpConfig;
+    undefined ->
+      case application:get_env (mondemand, config_file) of
+        {ok, File} ->
+          case file:read_file (File) of
+            {ok, Bin} ->
+              {match, [TraceEndPoint]} =
+                 re:run (Bin, "MONDEMAND_HTTP_ENDPOINT_TRACE=\"([^\"]+)\"",
+                              [{capture, all_but_first, list}]),
+              [{trace, TraceEndPoint}];
+            E ->
+              E
+          end;
+        undefined ->
+          {error, no_http_configured}
+      end
+  end.
+
 
 %%--------------------------------------------------------------------
 %%% Test functions
