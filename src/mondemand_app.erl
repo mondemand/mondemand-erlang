@@ -14,7 +14,7 @@
 start() ->
   [ ensure_started (App)
     || App
-    <- [sasl, syntax_tools, lwes, mondemand]
+    <- [sasl, syntax_tools, lwes, inets, mondemand]
   ].
 
 %-=====================================================================-

@@ -88,7 +88,8 @@
                   interval,
                   jitter,
                   timer,
-                  channels = dict:new()
+                  channels = dict:new(),
+                  http_config
                 }).
 
 %-=====================================================================-
@@ -129,6 +130,7 @@ add_sample (ProgId, Key, Context, Value)
   when is_integer (Value), is_list (Context) ->
   mondemand_statdb:add_sample (ProgId, Key, Context, Value).
 
+
 all () ->
   mondemand_statdb:all().
 
@@ -161,6 +163,9 @@ trace_owner_in_list (List) ->
   orelse proplists:is_defined (?MD_TRACE_OWNER_KEY_LIST, List)
   orelse proplists:is_defined (?MD_TRACE_OWNER_KEY_ATOM, List).
 
+send_trace (ProgId, Message, Context) 
+                      when is_tuple (Context) andalso element (1, Context) =:= dict -> 
+  send_trace (ProgId, Message, dict:to_list (Context));
 send_trace (ProgId, Message, Context) ->
   case Context of
     List when is_list (Context) ->
@@ -335,6 +340,12 @@ init([]) ->
   % use milliseconds for interval
   Interval = IntervalSecs * 1000,
 
+  HttpConfig =
+    case mondemand_config:get_http_config () of
+      {error, _} -> undefined;
+      HC -> HC
+    end,
+
   case mondemand_config:lwes_config () of
     {error, Error} ->
       {stop, {error, Error}};
@@ -363,7 +374,8 @@ init([]) ->
               config = Config,
               jitter = Jitter,
               interval = Interval,
-              channels = ChannelDict
+              channels = ChannelDict,
+              http_config = HttpConfig
             }
           };
         {error, Error} ->
@@ -402,19 +414,34 @@ handle_call (_Request, _From, State) ->
 
 % send an event
 handle_cast ({send, Name, Event},
-             State = #state { channels = ChannelDict }) ->
+             State = #state { http_config = HttpConfig }) ->
   NewState =
-    case dict:find (Name, ChannelDict) of
-      {ok, Channels} ->
-        NewChannels = lwes:emit (Channels, Event),
-        State#state { channels = dict:store (Name, NewChannels, ChannelDict)};
+    case Name of
+      ?MD_TRACE_EVENT ->
+        Bin = lwes_event:to_binary(Event),
+        case size(Bin) of
+          X when X > 65535 ->
+            post_via_http (Bin, HttpConfig),
+            State;
+          _ -> emit_one (Name, Bin, State)
+        end;
       _ ->
-        error_logger:error_msg ("Unrecognized event ~p : ~p",[Name, dict:to_list(ChannelDict)]),
-        State
+        emit_one (Name, Event, State)
     end,
   { noreply, NewState };
 handle_cast (_Request, State) ->
   {noreply, State}.
+
+emit_one (Name, Event, State = #state { channels = ChannelDict }) ->
+  case dict:find (Name, ChannelDict) of
+    {ok, Channels} ->
+      NewChannels = lwes:emit (Channels, Event),
+      State#state { channels = dict:store (Name, NewChannels, ChannelDict)};
+    _ ->
+      error_logger:error_msg ("Unrecognized event ~p : ~p",
+                              [Name, dict:to_list(ChannelDict)]),
+      State
+  end.
 
 handle_info (flush, State = #state {timer = undefined, interval = Interval}) ->
   {ok, TRef} = timer:send_interval (Interval, ?MODULE, flush),
@@ -469,6 +496,15 @@ open_all (Config) ->
 
 close_all (ChannelDict) ->
   [ lwes:close (Channels) || {_, Channels} <- dict:to_list (ChannelDict) ].
+
+post_via_http (Bin, HttpConfig) ->
+  case HttpConfig of
+    undefined -> ok;
+    _ -> Endpoint = proplists:get_value (trace, HttpConfig),
+         {ok, _ } = httpc:request (post,
+                                   {Endpoint, [], "", Bin},
+                                   [], [])
+  end.
 
 %%--------------------------------------------------------------------
 %%% Test functions
