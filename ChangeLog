@@ -1,3 +1,6 @@
+Version 6.4.1 (molinaro)
+  * don't crash if http trace endpoint is not set
+
 Version 6.4.0 (molinaro)
   * now able to post traces over 65kb
   * updated the version of lwes dependency

@@ -259,10 +259,14 @@ get_http_config () ->
         {ok, File} ->
           case file:read_file (File) of
             {ok, Bin} ->
-              {match, [TraceEndPoint]} =
-                 re:run (Bin, "MONDEMAND_HTTP_ENDPOINT_TRACE=\"([^\"]+)\"",
-                              [{capture, all_but_first, list}]),
-              [{trace, TraceEndPoint}];
+              case re:run (Bin,
+                           "MONDEMAND_TRACE_HTTP_ENDPOINT=\"([^\"]+)\"",
+                           [{capture, all_but_first, list}]) of
+                {match, [TraceEndPoint]} ->
+                  [{trace, TraceEndPoint}];
+                _ ->
+                  {error, no_http_configured}
+              end;
             E ->
               E
           end;
