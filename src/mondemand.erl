@@ -163,9 +163,6 @@ trace_owner_in_list (List) ->
   orelse proplists:is_defined (?MD_TRACE_OWNER_KEY_LIST, List)
   orelse proplists:is_defined (?MD_TRACE_OWNER_KEY_ATOM, List).
 
-send_trace (ProgId, Message, Context) 
-                      when is_tuple (Context) andalso element (1, Context) =:= dict -> 
-  send_trace (ProgId, Message, dict:to_list (Context));
 send_trace (ProgId, Message, Context) ->
   case Context of
     List when is_list (Context) ->
