@@ -1,7 +1,7 @@
 { application, mondemand,
   [
    { description, "Erlang Mondemand Bindings." },
-   { vsn, "6.4.0" },
+   { vsn, "6.4.1" },
    { modules, [] },
    { registered, [mondemand,mondemand_sup]},
    { applications, [kernel,stdlib,syntax_tools,lwes,inets]},
