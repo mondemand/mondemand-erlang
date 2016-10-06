@@ -16,6 +16,8 @@
 -export ([start_link/0,
           to_mondemand/0,
           to_list/0,
+          last/0,
+          last/1,
           collect_sample/1]).
 
 %% gen_server callbacks
@@ -66,6 +68,45 @@ start_link() ->
 to_mondemand() ->
   gen_server:call (?MODULE, to_mondemand).
 
+last () ->
+  gen_server:call (?MODULE, last).
+
+last (MetricOrMetrics) ->
+  Sample = gen_server:call (?MODULE, last),
+  case MetricOrMetrics of
+    A when is_atom (A) ->
+      {_,Value} = metric_from_sample (A, Sample),
+      Value;
+    L when is_list (L) ->
+      lists:map (fun (M) -> metric_from_sample (M, Sample) end, L)
+  end.
+
+metric_from_sample (Metric, Sample) ->
+  case Metric of
+    timestamp -> {Metric, Sample#vm_sample.timestamp};
+    context_switches -> {Metric, Sample#vm_sample.context_switches};
+    gc_count -> {Metric, Sample#vm_sample.gc_count};
+    gc_bytes_reclaimed -> {Metric, Sample#vm_sample.gc_bytes_reclaimed};
+    io_bytes_in -> {Metric, Sample#vm_sample.io_bytes_in};
+    io_bytes_out -> {Metric, Sample#vm_sample.io_bytes_out};
+    reductions -> {Metric, Sample#vm_sample.reductions};
+    runtime ->{Metric, Sample#vm_sample.runtime};
+    wallclock ->{Metric, Sample#vm_sample.wallclock};
+    run_queue ->{Metric, Sample#vm_sample.run_queue};
+    queued_messages ->{Metric, Sample#vm_sample.queued_messages};
+    memory_total ->{Metric, Sample#vm_sample.memory_total};
+    memory_process ->{Metric, Sample#vm_sample.memory_process};
+    memory_system ->{Metric, Sample#vm_sample.memory_system};
+    memory_atom ->{Metric, Sample#vm_sample.memory_atom};
+    memory_binary ->{Metric, Sample#vm_sample.memory_binary};
+    memory_ets ->{Metric, Sample#vm_sample.memory_ets};
+    process_count ->{Metric, Sample#vm_sample.process_count};
+    process_limit ->{Metric, Sample#vm_sample.process_limit};
+    port_count ->{Metric, Sample#vm_sample.port_count};
+    port_limit ->{Metric, Sample#vm_sample.port_limit}
+  end.
+
+
 to_list() ->
   gen_server:call (?MODULE, to_list).
 
@@ -90,6 +131,9 @@ init([]) ->
                 timer = TRef,
                 legacy = Legacy } }.
 
+handle_call (last, _From, State = #state { samples = Queue }) ->
+  {value, LastSample} = queue:peek_r (Queue),
+  {reply, LastSample, State};
 handle_call (to_list, _From, State = #state { samples = Queue }) ->
   {reply, queue:to_list (Queue), State};
 handle_call (to_mondemand, _From,

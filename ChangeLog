@@ -1,3 +1,6 @@
+Version 6.5.0 (molinaro)
+  * add a call to get vmstats out from the vmstats sampler
+
 Version 6.4.1 (molinaro)
   * don't crash if http trace endpoint is not set
 
