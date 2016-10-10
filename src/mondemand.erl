@@ -69,6 +69,7 @@
            reset_stats/0,
            stats/0,
            all/0,
+           all_event_names_as_binary/0,
            get_lwes_config/0,
            reload_config/0,
            current_config/0,
@@ -133,6 +134,8 @@ add_sample (ProgId, Key, Context, Value)
 
 all () ->
   mondemand_statdb:all().
+
+all_event_names_as_binary () -> ?ALL_EVENTS_BINARY.
 
 get_lwes_config () ->
   mondemand_config:lwes_config().

@@ -98,4 +98,6 @@
                         repeat_count
                       }).
 
+-define (ALL_EVENTS_BINARY, [?MD_ANNOTATION_EVENT, ?MD_LOG_EVENT,  ?MD_PERF_EVENT, ?MD_STATS_EVENT, ?MD_TRACE_EVENT]).
+
 -endif.
