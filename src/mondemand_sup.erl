@@ -22,22 +22,18 @@ init([]) ->
   mondemand_config:init(),
 
   VMStatsChild =
-    case application:get_env (mondemand, vmstats) of
-      {ok, L} when is_list (L) ->
-        case proplists:get_value (program_id, L) of
-          undefined -> [];
-          _ ->
-            [
-              { mondemand_vmstats,
-               {mondemand_vmstats, start_link, []},
-               permanent,
-               2000,
-               worker,
-               [mondemand_vmstats]
-              }
-            ]
-        end;
-      _ ->
+    case mondemand_config:vmstats_enabled () of
+      true ->
+        [
+          { mondemand_vmstats,
+           {mondemand_vmstats, start_link, []},
+           permanent,
+           2000,
+           worker,
+           [mondemand_vmstats]
+          }
+        ];
+      false ->
         []
     end,
 

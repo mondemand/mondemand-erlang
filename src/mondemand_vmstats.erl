@@ -16,9 +16,12 @@
 -export ([start_link/0,
           to_mondemand/0,
           to_list/0,
+          first/0,
+          first/1,
           last/0,
           last/1,
-          collect_sample/1]).
+          collect_sample/2,
+          scheduler_wall_time_diff/2]).
 
 %% gen_server callbacks
 -export ( [ init/1,
@@ -33,7 +36,10 @@
                  max_samples = 300,  % 5 minutes of sampled data
                  legacy = false,     % old otp workarounds
                  previous_mondemand,
-                 timer
+                 timer,
+                 scheduler_former_flag,% keep track of previous scheduler
+                                       % stats flag for shutdown
+                 collect_scheduler_stats
                 }).
 
 -record (vm_sample, { timestamp,
@@ -56,7 +62,8 @@
                       process_count,
                       process_limit,
                       port_count,
-                      port_limit
+                      port_limit,
+                      scheduler_wall_time
                     }).
 
 %-=====================================================================-
@@ -68,18 +75,23 @@ start_link() ->
 to_mondemand() ->
   gen_server:call (?MODULE, to_mondemand).
 
+first () ->
+  gen_server:call (?MODULE, first).
+
+first (MetricOrMetrics) ->
+  metrics_from_sample (MetricOrMetrics, first()).
+
 last () ->
   gen_server:call (?MODULE, last).
 
 last (MetricOrMetrics) ->
-  Sample = gen_server:call (?MODULE, last),
-  case MetricOrMetrics of
-    A when is_atom (A) ->
-      {_,Value} = metric_from_sample (A, Sample),
-      Value;
-    L when is_list (L) ->
-      lists:map (fun (M) -> metric_from_sample (M, Sample) end, L)
-  end.
+  metrics_from_sample (MetricOrMetrics, last()).
+
+metrics_from_sample (A, Sample = #vm_sample {}) when is_atom (A) ->
+  {_,Value} = metric_from_sample (A, Sample),
+  Value;
+metrics_from_sample (L, Sample = #vm_sample {}) when is_list (L) ->
+  lists:map (fun (M) -> metric_from_sample (M, Sample) end, L).
 
 metric_from_sample (Metric, Sample) ->
   case Metric of
@@ -90,22 +102,22 @@ metric_from_sample (Metric, Sample) ->
     io_bytes_in -> {Metric, Sample#vm_sample.io_bytes_in};
     io_bytes_out -> {Metric, Sample#vm_sample.io_bytes_out};
     reductions -> {Metric, Sample#vm_sample.reductions};
-    runtime ->{Metric, Sample#vm_sample.runtime};
-    wallclock ->{Metric, Sample#vm_sample.wallclock};
-    run_queue ->{Metric, Sample#vm_sample.run_queue};
-    queued_messages ->{Metric, Sample#vm_sample.queued_messages};
-    memory_total ->{Metric, Sample#vm_sample.memory_total};
-    memory_process ->{Metric, Sample#vm_sample.memory_process};
-    memory_system ->{Metric, Sample#vm_sample.memory_system};
-    memory_atom ->{Metric, Sample#vm_sample.memory_atom};
-    memory_binary ->{Metric, Sample#vm_sample.memory_binary};
-    memory_ets ->{Metric, Sample#vm_sample.memory_ets};
-    process_count ->{Metric, Sample#vm_sample.process_count};
-    process_limit ->{Metric, Sample#vm_sample.process_limit};
-    port_count ->{Metric, Sample#vm_sample.port_count};
-    port_limit ->{Metric, Sample#vm_sample.port_limit}
+    runtime -> {Metric, Sample#vm_sample.runtime};
+    wallclock -> {Metric, Sample#vm_sample.wallclock};
+    run_queue -> {Metric, Sample#vm_sample.run_queue};
+    queued_messages -> {Metric, Sample#vm_sample.queued_messages};
+    memory_total -> {Metric, Sample#vm_sample.memory_total};
+    memory_process -> {Metric, Sample#vm_sample.memory_process};
+    memory_system -> {Metric, Sample#vm_sample.memory_system};
+    memory_atom -> {Metric, Sample#vm_sample.memory_atom};
+    memory_binary -> {Metric, Sample#vm_sample.memory_binary};
+    memory_ets -> {Metric, Sample#vm_sample.memory_ets};
+    process_count -> {Metric, Sample#vm_sample.process_count};
+    process_limit -> {Metric, Sample#vm_sample.process_limit};
+    port_count -> {Metric, Sample#vm_sample.port_count};
+    port_limit -> {Metric, Sample#vm_sample.port_limit};
+    scheduler_wall_time -> {Metric, Sample#vm_sample.scheduler_wall_time }
   end.
-
 
 to_list() ->
   gen_server:call (?MODULE, to_list).
@@ -121,16 +133,30 @@ init([]) ->
       _ -> false
     end,
 
-  InitialSample = collect_sample (Legacy),
+  % allow scheduler stats to be turned off (should default to true)
+  {Former, CollectSchedulerStats} =
+    case mondemand_config:vmstats_disable_scheduler_wall_time() of
+      true -> {undefined, false};
+      false -> {erlang:system_flag(scheduler_wall_time, true), true}
+    end,
+
+  InitialSample = collect_sample (Legacy, CollectSchedulerStats),
   InitialQueue = queue:in (InitialSample, queue:new ()),
   TRef = timer:send_interval (1000, collect), % collect samples every second
   % keep the initial sample as both the previous mondemand value and put
   % it into the queue
-  { ok, #state{ samples = InitialQueue,
-                previous_mondemand = InitialSample,
-                timer = TRef,
-                legacy = Legacy } }.
+  { ok, #state { samples = InitialQueue,
+                 previous_mondemand = InitialSample,
+                 timer = TRef,
+                 legacy = Legacy,
+                 collect_scheduler_stats = CollectSchedulerStats,
+                 scheduler_former_flag = Former
+                }
+  }.
 
+handle_call (first, _From, State = #state { samples = Queue }) ->
+  {value, FirstSample} = queue:peek (Queue),
+  {reply, FirstSample, State};
 handle_call (last, _From, State = #state { samples = Queue }) ->
   {value, LastSample} = queue:peek_r (Queue),
   {reply, LastSample, State};
@@ -152,10 +178,11 @@ handle_cast (_Request, State = #state { }) ->
 handle_info (collect,
              State = #state {samples = QueueIn,
                              max_samples = Max,
-                             legacy = Legacy
+                             legacy = Legacy,
+                             collect_scheduler_stats = CollectSchedulerStats
                             }) ->
   % collect a sample
-  CurrentSample = collect_sample (Legacy),
+  CurrentSample = collect_sample (Legacy, CollectSchedulerStats),
 
   % insert it into the queue
   QueueOut =
@@ -172,8 +199,14 @@ handle_info (collect,
 handle_info (_Info, State = #state {}) ->
   {noreply, State}.
 
-terminate (_Reason, _State) ->
+terminate (_Reason, #state { scheduler_former_flag = Former }) ->
+  % revert to the former wall time
+  case Former =/= undefined of
+    true -> erlang:system_flag(scheduler_wall_time, Former);
+    false -> ok
+  end,
   ok.
+
 code_change (_OldVsn, State, _Extra) ->
   {ok, State}.
 
@@ -181,7 +214,7 @@ code_change (_OldVsn, State, _Extra) ->
 %% private functions
 %%====================================================================
 
-collect_sample (Legacy) ->
+collect_sample (Legacy, CollectSchedulerStats) ->
 
   Timestamp = mondemand_util:seconds_since_epoch (),
 
@@ -238,6 +271,12 @@ collect_sample (Legacy) ->
       false -> {erlang:system_info(port_count), erlang:system_info(port_limit)}
     end,
 
+  SchedWallTime =
+    case CollectSchedulerStats of
+      true -> erlang:statistics(scheduler_wall_time);
+      false -> undefined
+    end,
+
   #vm_sample {
     timestamp = Timestamp,
     context_switches = ContextSwitches,
@@ -259,7 +298,8 @@ collect_sample (Legacy) ->
     process_count = ProcessCount,
     process_limit = ProcessLimit,
     port_count = PortCount,
-    port_limit = PortLimit
+    port_limit = PortLimit,
+    scheduler_wall_time = SchedWallTime
   }.
 
 to_mondemand (#vm_sample {
@@ -270,7 +310,8 @@ to_mondemand (#vm_sample {
                io_bytes_out = PrevOutput,
                reductions = PrevReductions,
                runtime = PrevRuntime,
-               wallclock = PrevWallclock
+               wallclock = PrevWallclock,
+               scheduler_wall_time = PrevSchedWallTime
              },
              #vm_sample {
                timestamp = _Timestamp,
@@ -293,7 +334,8 @@ to_mondemand (#vm_sample {
                process_count = ProcessCount,
                process_limit = ProcessLimit,
                port_count = PortCount,
-               port_limit = PortLimit
+               port_limit = PortLimit,
+               scheduler_wall_time = SchedWallTime
              }) ->
     [
       { gauge, context_switches, ContextSwitches - PrevContextSwitches },
@@ -316,7 +358,22 @@ to_mondemand (#vm_sample {
       { gauge, process_limit, ProcessLimit },
       { gauge, port_count, PortCount },
       { gauge, port_limit, PortLimit }
+      | scheduler_wall_time_diff (PrevSchedWallTime, SchedWallTime)
     ].
+
+scheduler_wall_time_diff (undefined,_) -> [];
+scheduler_wall_time_diff (_,undefined) -> [];
+scheduler_wall_time_diff (PrevSchedWallTime, SchedWallTime) ->
+  [ { gauge,
+      ["scheduler_",integer_to_list(I),"_utilization"],
+      case TotalTime - PrevTotalTime of
+        0 -> 0;
+        TotalDiff -> trunc (((ActiveTime - PrevActiveTime)/TotalDiff) * 100.0)
+      end
+    }
+    || {{I, PrevActiveTime, PrevTotalTime}, {I, ActiveTime, TotalTime}}
+    <- lists:zip(lists:sort(PrevSchedWallTime),lists:sort(SchedWallTime))
+  ].
 
 %%--------------------------------------------------------------------
 %%% Test functions

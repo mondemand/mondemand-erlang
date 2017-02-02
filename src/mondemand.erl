@@ -301,16 +301,12 @@ send_stats (ProgId, Context, Stats) ->
   send_event (Event).
 
 flush () ->
-  case application:get_env (mondemand, vmstats) of
-    {ok, L} when is_list (L) ->
-      case proplists:get_value (program_id, L) of
-        undefined -> ok;
-        ProgId ->
-          Context = proplists:get_value (context, L, []),
-          VmStats = mondemand_vmstats:to_mondemand (),
-          send_stats (ProgId, Context, VmStats)
-      end;
-    _ -> ok
+  case mondemand_config:vmstats_prog_id () of
+    undefined -> ok;
+    ProgId ->
+      Context = mondemand_config:vmstats_context (),
+      VmStats = mondemand_vmstats:to_mondemand (),
+      send_stats (ProgId, Context, VmStats)
   end,
   mondemand_statdb:flush (1, fun flush_one/1).
 

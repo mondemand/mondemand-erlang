@@ -25,7 +25,11 @@
            minutes_to_keep/0,
            max_metrics/0,
            parse_config/1,
-           get_http_config/0
+           get_http_config/0,
+           vmstats_enabled/0,
+           vmstats_prog_id/0,
+           vmstats_context/0,
+           vmstats_disable_scheduler_wall_time/0
          ]).
 
 -define (DEFAULT_MAX_SAMPLE_SIZE, 10).
@@ -273,6 +277,34 @@ get_http_config () ->
         undefined ->
           {error, no_http_configured}
       end
+  end.
+
+vmstats_enabled () ->
+  case application:get_env (mondemand, vmstats) of
+    {ok, L} when is_list (L) ->
+      case proplists:get_value (program_id, L) of
+        undefined -> false;
+        _ -> true
+      end;
+    _ ->
+      false
+  end.
+
+vmstats_prog_id () ->
+  vmstats_config (program_id, undefined).
+vmstats_context () ->
+  vmstats_config (context, []).
+vmstats_disable_scheduler_wall_time () ->
+  vmstats_config (disable_scheduler_wall_time, false).
+
+vmstats_config (K, Default) ->
+  case application:get_env (mondemand, vmstats) of
+    {ok, L} when is_list (L) ->
+      case proplists:get_value (K, L) of
+        undefined -> Default;
+        V -> V
+      end;
+    _ -> Default
   end.
 
 

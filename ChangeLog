@@ -1,3 +1,6 @@
+Verison 6.6.0 (molinaro)
+  * add scheduler utilization
+
 Version 6.5.0 (molinaro)
   * add a call to get vmstats out from the vmstats sampler
   * add a call to get all event names
