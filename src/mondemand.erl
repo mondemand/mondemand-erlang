@@ -293,6 +293,8 @@ send_annotation (Id, Time, Description, Text, Tags, Context) ->
     ),
   send_event (Event).
 
+send_stats (_, _, []) ->
+  ok;
 send_stats (ProgId, Context, Stats) ->
   Event =
     mondemand_statsmsg:to_lwes (

@@ -35,7 +35,7 @@
 -record (state, {samples = queue:new(),
                  max_samples = 300,  % 5 minutes of sampled data
                  legacy = false,     % old otp workarounds
-                 previous_mondemand,
+                 previous_mondemand = undefined,
                  timer,
                  scheduler_former_flag,% keep track of previous scheduler
                                        % stats flag for shutdown
@@ -146,7 +146,6 @@ init([]) ->
   % keep the initial sample as both the previous mondemand value and put
   % it into the queue
   { ok, #state { samples = InitialQueue,
-                 previous_mondemand = InitialSample,
                  timer = TRef,
                  legacy = Legacy,
                  collect_scheduler_stats = CollectSchedulerStats,
@@ -167,7 +166,19 @@ handle_call (to_mondemand, _From,
                               previous_mondemand = Prev }) ->
   % queue should always have something in it
   {value, LastSample} = queue:peek_r (Queue),
-  Stats = to_mondemand (Prev, LastSample),
+  Stats =
+    case Prev =:= undefined of
+      true ->
+        % we skip the first send of data to mondemand, as we have no way
+        % to really ensure the normal duration between sends to mondemand
+        % has elapsed, if it hasn't elapsed we might be emitting to mondemand
+        % shortly after restart and would see some spikiness in any counters
+        % (as they are turned into gauges with the assumption calls to 
+        % to_mondemand/0 are happening on a regular interval).
+        [];
+      false ->
+        to_mondemand (Prev, LastSample)
+    end,
   {reply, Stats, State#state { previous_mondemand = LastSample } };
 handle_call (_Request, _From, State = #state { }) ->
   {reply, ok, State }.

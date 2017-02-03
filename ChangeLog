@@ -1,5 +1,11 @@
-Verison 6.6.0 (molinaro)
-  * add scheduler utilization
+Version 6.6.1 (molinaro)
+  * make sure that mondemand vmstats metrics are not emitted without a full
+  interval having gone by.  This means a restart of a service can lead to
+  a gap in vmstats, but that's better than the spikes which can happen with
+  out waiting (IMHO).
+
+Version 6.6.0 (molinaro)
+  * add scheduler utilization to vmstats
 
 Version 6.5.0 (molinaro)
   * add a call to get vmstats out from the vmstats sampler
