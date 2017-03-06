@@ -66,6 +66,7 @@
 
            % other functions
            send_stats/3,
+           flush_one_stat/2,
            reset_stats/0,
            stats/0,
            all/0,
@@ -90,7 +91,8 @@
                   jitter,
                   timer,
                   channels = dict:new(),
-                  http_config
+                  http_config,
+                  flush_config
                 }).
 
 %-=====================================================================-
@@ -302,7 +304,7 @@ send_stats (ProgId, Context, Stats) ->
     ),
   send_event (Event).
 
-flush () ->
+flush ({FlushModule, FlushStatePrepFunction, FlushFunction}) ->
   case mondemand_config:vmstats_prog_id () of
     undefined -> ok;
     ProgId ->
@@ -310,7 +312,18 @@ flush () ->
       VmStats = mondemand_vmstats:to_mondemand (),
       send_stats (ProgId, Context, VmStats)
   end,
-  mondemand_statdb:flush (1, fun flush_one/1).
+  % allow some initialization of state to be sent to each invocation
+  UserState = case FlushStatePrepFunction of
+                undefined -> undefined;
+                _ ->  FlushModule:FlushStatePrepFunction()
+              end,
+  mondemand_statdb:flush (1,
+                          fun (StatsMsg) ->
+                            erlang:apply (FlushModule,
+                                          FlushFunction,
+                                          [UserState, StatsMsg])
+                          end
+                         ).
 
 reset_stats () ->
   mondemand_statdb:reset_stats().
@@ -329,11 +342,7 @@ current_config () ->
 %-=====================================================================-
 init([]) ->
 
-  IntervalSecs =
-    case application:get_env (mondemand, send_interval) of
-      {ok, I} when is_integer (I) -> I;
-      _ -> ?MD_DEFAULT_SEND_INTERVAL
-    end,
+  IntervalSecs = mondemand_config:send_interval(),
 
   % use milliseconds for interval
   Interval = IntervalSecs * 1000,
@@ -343,6 +352,7 @@ init([]) ->
       {error, _} -> undefined;
       HC -> HC
     end,
+  FlushConfig = mondemand_config:flush_config(),
 
   case mondemand_config:lwes_config () of
     {error, Error} ->
@@ -373,7 +383,8 @@ init([]) ->
               jitter = Jitter,
               interval = Interval,
               channels = ChannelDict,
-              http_config = HttpConfig
+              http_config = HttpConfig,
+              flush_config = FlushConfig
             }
           };
         {error, Error} ->
@@ -441,12 +452,15 @@ emit_one (Name, Event, State = #state { channels = ChannelDict }) ->
       State
   end.
 
-handle_info (flush, State = #state {timer = undefined, interval = Interval}) ->
+handle_info (flush, State = #state {timer = undefined,
+                                    interval = Interval,
+                                    flush_config = FlushConfig
+                                   }) ->
   {ok, TRef} = timer:send_interval (Interval, ?MODULE, flush),
-  flush (),
+  flush (FlushConfig),
   {noreply, State#state {timer = TRef}};
-handle_info (flush, State = #state {}) ->
-  flush (),
+handle_info (flush, State = #state {flush_config = FlushConfig}) ->
+  flush (FlushConfig),
   {noreply, State#state {}};
 handle_info (_Info, State) ->
   {noreply, State}.
@@ -466,8 +480,8 @@ send_event (Events) when is_list (Events) ->
 send_event (Event = #lwes_event { name = Name }) ->
   gen_server:cast (?MODULE, {send, Name, lwes_event:to_binary (Event)}).
 
-flush_one (Stats) ->
-  send_event (mondemand_statsmsg:to_lwes (Stats)).
+flush_one_stat (_, StatsMsg) ->
+  send_event (mondemand_statsmsg:to_lwes (StatsMsg)).
 
 open_all (Config) ->
   lists:foldl (fun ({T,C},{ok, D}) ->

@@ -1,3 +1,9 @@
+Version 6.7.0 (molinaro)
+  * generalize flush functionality so that the server can plug in a slightly
+  modified version.
+  * cleanup some config, all application config should be read only in
+  mondemand_config
+
 Version 6.6.1 (molinaro)
   * make sure that mondemand vmstats metrics are not emitted without a full
   interval having gone by.  This means a restart of a service can lead to
