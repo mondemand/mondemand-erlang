@@ -21,6 +21,7 @@
            host/0,
            default_max_sample_size/0,
            default_stats/0,
+           send_interval/0,
            lwes_config/0,
            minutes_to_keep/0,
            max_metrics/0,
@@ -29,15 +30,19 @@
            vmstats_enabled/0,
            vmstats_prog_id/0,
            vmstats_context/0,
-           vmstats_disable_scheduler_wall_time/0
+           vmstats_disable_scheduler_wall_time/0,
+           vmstats_legacy_workaround/0,
+           flush_config/0
          ]).
 
+-define (DEFAULT_SEND_INTERVAL, 60).
 -define (DEFAULT_MAX_SAMPLE_SIZE, 10).
 -define (DEFAULT_STATS, [min, max, sum, count]).
 -define (DEFAULT_MINUTES_TO_KEEP, 10).
+-define (DEFAULT_MAX_METRICS, 512).
+
 -define (MOCHI_SENDER_HOST, mondemand_sender_host_global).
 -define (MOCHI_MAX_METRICS, mondemand_max_metrics_global).
--define (DEFAULT_MAX_METRICS, 512).
 
 % this function is meant to be called before the supervisor and
 % pulls all those configs which are mostly static.
@@ -68,6 +73,12 @@ default_stats () ->
   case application:get_env (mondemand, default_stats) of
     undefined -> ?DEFAULT_STATS;
     {ok, L} when is_list (L) -> L
+  end.
+
+send_interval () ->
+  case application:get_env (mondemand, send_interval) of
+    {ok, I} when is_integer (I) -> I;
+    _ -> ?DEFAULT_SEND_INTERVAL
   end.
 
 lwes_config () ->
@@ -297,6 +308,12 @@ vmstats_context () ->
 vmstats_disable_scheduler_wall_time () ->
   vmstats_config (disable_scheduler_wall_time, false).
 
+vmstats_legacy_workaround () ->
+  case application:get_env(mondemand,r15b_workaround) of
+    {ok, true} -> true;
+    _ -> false
+  end.
+
 vmstats_config (K, Default) ->
   case application:get_env (mondemand, vmstats) of
     {ok, L} when is_list (L) ->
@@ -307,6 +324,13 @@ vmstats_config (K, Default) ->
     _ -> Default
   end.
 
+flush_config () ->
+  case application:get_env (mondemand, flush_config) of
+    {ok, {Module, FlushStatePrepFunction, FlushFunction}} ->
+      {Module, FlushStatePrepFunction, FlushFunction};
+    undefined ->
+      {mondemand, undefined, flush_one_stat}
+  end.
 
 %%--------------------------------------------------------------------
 %%% Test functions

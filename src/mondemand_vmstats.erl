@@ -127,11 +127,7 @@ to_list() ->
 %-=====================================================================-
 init([]) ->
   % work around for the fact that R15B didn't have port_count
-  Legacy =
-    case application:get_env(mondemand,r15b_workaround) of
-      {ok, true} -> true;
-      _ -> false
-    end,
+  Legacy = mondemand_config:vmstats_legacy_workaround(),
 
   % allow scheduler stats to be turned off (should default to true)
   {Former, CollectSchedulerStats} =

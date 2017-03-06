@@ -4,7 +4,6 @@
 -include("mondemand.hrl").
 
 % global defaults
--define (MD_DEFAULT_SEND_INTERVAL, 60).
 
 % these are common fields in several lwes events
 -define (MD_RECEIPT_TIME,  <<"ReceiptTime">>).
