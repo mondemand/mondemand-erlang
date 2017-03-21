@@ -329,7 +329,7 @@ flush_config () ->
     {ok, {Module, FlushStatePrepFunction, FlushFunction}} ->
       {Module, FlushStatePrepFunction, FlushFunction};
     undefined ->
-      {mondemand, undefined, flush_one_stat}
+      {mondemand, flush_state_init, flush_one_stat}
   end.
 
 %%--------------------------------------------------------------------

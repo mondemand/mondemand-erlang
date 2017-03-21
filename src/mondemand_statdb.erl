@@ -87,9 +87,9 @@
 
           map_now/1,
           map_then/2,
-          map/3,
+          map/4,
 
-          flush/2,
+          flush/3,
           config/0,
           all/0,
           reset_stats/0,
@@ -113,6 +113,7 @@
                   max_sample_size,
                   statistics
                  }).
+-record (map_state, {host, collect_time, stats_set_table, user_state}).
 
 -define (STATS_TABLE,  md_stats).
 -define (CONFIG_TABLE, md_config).
@@ -479,14 +480,14 @@ config () ->
 map_now (Function) ->
   CurrentMinuteMillis = mondemand_util:current(),
   StatsSetTable = minute_tab (mondemand_util:current_minute()),
-  map (Function, CurrentMinuteMillis, StatsSetTable).
+  map (Function, ok, CurrentMinuteMillis, StatsSetTable).
 
 map_then (Function, Ago) ->
   CurrentMinuteMillis = mondemand_util:current(),
   PreviousMinuteMillis = CurrentMinuteMillis - 60000 * Ago,
   PreviousMinute = minutes_ago (mondemand_util:current_minute(), Ago),
   StatsSetTable = minute_tab (PreviousMinute),
-  map (Function, PreviousMinuteMillis, StatsSetTable).
+  map (Function, ok, PreviousMinuteMillis, StatsSetTable).
 
 % I want to iterate over the config table, collapsing all metrics for a
 % particular program id and context into a group so they can all be processed
@@ -495,7 +496,7 @@ map_then (Function, Ago) ->
 % I want to use ets:first/1 and ets:next/2 so I can eventually set some rules
 % about how they are processed in terms of time spent overall
 %
-map (Function, CollectTime, StatsSetTable) ->
+map (Function, InitialState, CollectTime, StatsSetTable) ->
   % there a couple of things we'd like to not recalculate but are probably
   % used over and over, so get them here and pass them through
   Host = mondemand_config:host (),
@@ -504,7 +505,12 @@ map (Function, CollectTime, StatsSetTable) ->
     '$end_of_table' -> [];
     FirstKey ->
       % put the first into the current list to collapse
-      map1 (Function, {Host, CollectTime, StatsSetTable}, [FirstKey])
+      map1 (Function,
+            #map_state { host = Host,
+                         collect_time = CollectTime,
+                         stats_set_table = StatsSetTable,
+                         user_state = InitialState },
+            [FirstKey])
   end.
 
 % need to skip the config as that's not what we want to map over
@@ -514,7 +520,7 @@ map1 (Function, State, [Key = '$default_config']) ->
     NextKey ->
       map1 (Function, State, [NextKey])
   end;
-map1 (Function, State,
+map1 (Function, State = #map_state {user_state = UserState},
      % match out the ProgId and Context from the current collapsed list
      AllKeys = [LastKey = #mdkey {prog_id = ProgId, context = Context}|_]) ->
 
@@ -522,20 +528,24 @@ map1 (Function, State,
     '$end_of_table' ->
       % we hit the end of the table, so just call the function with the
       % current set of matched keys
-      Function (construct_stats_msg (AllKeys, State));
+      Function (construct_stats_msg (AllKeys, State), UserState);
     Key = #mdkey {prog_id = ProgId, context = Context} ->
       % this particular entry has the same ProgId and Context, so add it
       % to the list of keys which are grouped together
       map1 (Function, State, [Key|AllKeys]);
     NonMatchingKey ->
       % the key didn't match, so call the function with the current set
-      Function (construct_stats_msg (AllKeys, State)),
+      NewUserState =
+        Function (construct_stats_msg (AllKeys, State), UserState),
       % then use this key for the next iteration
-      map1 (Function, State, [NonMatchingKey])
+      map1 (Function, State#map_state { user_state = NewUserState},
+            [NonMatchingKey])
   end.
 
 construct_stats_msg (AllKeys = [#mdkey {prog_id = ProgId, context = Context}|_],
-                     {Host, CollectTime, Table}) ->
+                     #map_state {host = Host,
+                                 collect_time = CollectTime,
+                                 stats_set_table = Table}) ->
   Metrics = [ lookup_metric (I, Table) || I <- AllKeys ],
   {FinalHost, FinalContext} =
     mondemand_util:context_from_context (Host, Context),
@@ -613,7 +623,7 @@ all () ->
              "--------------------"]),
   map_now (fun (#md_stats_msg {prog_id = ProgId,
                                context = Context,
-                               metrics = Metrics}) ->
+                               metrics = Metrics}, State) ->
              [
                case T of
                  IT when IT =:= gauge; IT =:= counter ->
@@ -633,9 +643,9 @@ all () ->
                    ]
                end
                || #md_metric { type = T, key = K, value = V } <- Metrics
-             ]
-           end),
-  ok.
+             ],
+             State
+           end).
 
 %-=====================================================================-
 %-                        gen_server callbacks                         -
@@ -732,17 +742,19 @@ minutes_ago (MinuteNow, Ago) ->
     N -> N
   end.
 
-flush (MinutesAgo, Function) ->
+flush (MinutesAgo, Function, InitialState) ->
   CurrentMinute = mondemand_util:current_minute(),
   CurrentMinuteMillis = mondemand_util:current(),
   PreviousMinuteMillis = CurrentMinuteMillis - 60000 * MinutesAgo,
   PreviousMinute = minutes_ago (CurrentMinute, MinutesAgo),
   StatsSetTable = minute_tab (PreviousMinute),
-  map (Function, PreviousMinuteMillis, StatsSetTable),
+  FinalState =
+    map (Function, InitialState, PreviousMinuteMillis, StatsSetTable),
   MinuteToDelete =
     minute_tab (minutes_ago (CurrentMinute,
                              mondemand_config:minutes_to_keep())),
-  ets:delete_all_objects (MinuteToDelete).
+  ets:delete_all_objects (MinuteToDelete),
+  FinalState.
 
 ets_to_statset (Data, Stats) ->
   % this needs to match the create side

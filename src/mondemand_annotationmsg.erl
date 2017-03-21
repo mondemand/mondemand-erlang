@@ -11,6 +11,8 @@
            tags/1,
            context/1,
            context_value/2,
+           add_contexts/2,
+           add_context/3,
            to_lwes/1,
            from_lwes/1
          ]).
@@ -46,6 +48,18 @@ context_find (Key, Context, Default) ->
     false -> Default;
     {_, H} -> H
   end.
+
+add_contexts (A = #md_annotation_msg { num_context = ContextNum,
+                                       context = Context},
+              L) when is_list (L) ->
+  A#md_annotation_msg { num_context = ContextNum + length (L),
+                        context = L ++ Context }.
+
+add_context (A = #md_annotation_msg { num_context = ContextNum,
+                                      context = Context},
+             ContextKey, ContextValue) ->
+  A#md_annotation_msg { num_context = ContextNum + 1,
+                        context = [ {ContextKey, ContextValue} | Context ] }.
 
 tags_from_lwes (Data) ->
   Num = mondemand_util:find_in_dict (?MD_ANNOTATION_TAG_NUM, Data, 0),
@@ -111,3 +125,30 @@ from_lwes (#lwes_event { attrs = Data}) ->
 % Precompute tag keys
 annotation_tag_key (N) ->
   ?ELEMENT_OF_TUPLE_LIST (N, ?MD_ANNOTATION_TAG).
+
+%-=====================================================================-
+%-                            Test Functions                           -
+%-=====================================================================-
+-ifdef (TEST).
+-include_lib ("eunit/include/eunit.hrl").
+
+annotation_test_ () ->
+  [
+    { "basic constructor test",
+      fun() ->
+        C = [{<<"foo">>,<<"bar">>}],
+        T = [<<"tag1">>,<<"tag2">>],
+        A = new (<<"baz">>, 123456, <<"description">>, <<"text">>, T, C),
+        ?assertEqual (<<"baz">>, id(A)),
+        ?assertEqual (123456, timestamp(A)),
+        ?assertEqual (<<"description">>, description(A)),
+        ?assertEqual (<<"text">>, text(A)),
+        ?assertEqual (T, tags(A)),
+        ?assertEqual (C, context(A)),
+        ?assertEqual (<<"bar">>, context_value (A, <<"foo">>)),
+        ?assertEqual (undefined, context_value (A, <<"bar">>))
+      end
+    }
+  ].
+
+-endif.

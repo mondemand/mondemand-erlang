@@ -5,7 +5,11 @@
 
 -export ([ new/4,  % (ProgId, Host, Context, Lines)
            new/5,  % (ProgId, Host, Context, Lines, SendTime)
-           new_line/5 % (File, Line, Priority, Message, RepeatCount)
+           new_line/5, % (File, Line, Priority, Message, RepeatCount)
+           context/1,
+           context_value/2,
+           add_contexts/2,
+           add_context/3
          ]).
 
 -export ([ to_lwes/1,
@@ -29,6 +33,28 @@ new_line (File, Line, Priority, Message, RepeatCount) ->
                  priority = Priority,
                  message = Message,
                  repeat_count = RepeatCount }.
+
+context (#md_log_msg { context = Context }) -> Context.
+context_value (#md_log_msg { context = Context }, ContextKey) ->
+  context_find (ContextKey, Context, undefined).
+
+context_find (Key, Context, Default) ->
+  case lists:keyfind (Key, 1, Context) of
+    false -> Default;
+    {_, H} -> H
+  end.
+
+add_contexts (LM = #md_log_msg { num_context = ContextNum,
+                                 context = Context},
+              L) when is_list (L) ->
+  LM#md_log_msg { num_context = ContextNum + length (L),
+                  context = L ++ Context }.
+
+add_context (LM = #md_log_msg { num_context = ContextNum,
+                                context = Context},
+             ContextKey, ContextValue) ->
+  LM#md_log_msg { num_context = ContextNum + 1,
+                  context = [ {ContextKey, ContextValue} | Context ] }.
 
 to_lwes (L) when is_list (L) ->
     lists:map (fun to_lwes/1, L);

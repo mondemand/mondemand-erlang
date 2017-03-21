@@ -66,6 +66,7 @@
 
            % other functions
            send_stats/3,
+           flush_state_init/0,
            flush_one_stat/2,
            reset_stats/0,
            stats/0,
@@ -313,17 +314,16 @@ flush ({FlushModule, FlushStatePrepFunction, FlushFunction}) ->
       send_stats (ProgId, Context, VmStats)
   end,
   % allow some initialization of state to be sent to each invocation
-  UserState = case FlushStatePrepFunction of
-                undefined -> undefined;
-                _ ->  FlushModule:FlushStatePrepFunction()
-              end,
-  mondemand_statdb:flush (1,
-                          fun (StatsMsg) ->
-                            erlang:apply (FlushModule,
-                                          FlushFunction,
-                                          [UserState, StatsMsg])
-                          end
-                         ).
+  Start = os:timestamp (),
+  Ret = mondemand_statdb:flush (1,
+                                fun FlushModule:FlushFunction/2,
+                                FlushModule:FlushStatePrepFunction()
+                               ),
+  Finish = os:timestamp (),
+  error_logger:info_msg ("flushing took ~p millis and returned ~p",
+                         [webmachine_util:now_diff_milliseconds (Finish,Start),
+                          Ret]),
+  Ret.
 
 reset_stats () ->
   mondemand_statdb:reset_stats().
@@ -480,8 +480,12 @@ send_event (Events) when is_list (Events) ->
 send_event (Event = #lwes_event { name = Name }) ->
   gen_server:cast (?MODULE, {send, Name, lwes_event:to_binary (Event)}).
 
-flush_one_stat (_, StatsMsg) ->
-  send_event (mondemand_statsmsg:to_lwes (StatsMsg)).
+flush_state_init () ->
+  ok.
+
+flush_one_stat (StatsMsg, State) ->
+  send_event (mondemand_statsmsg:to_lwes (StatsMsg)),
+  State.
 
 open_all (Config) ->
   lists:foldl (fun ({T,C},{ok, D}) ->

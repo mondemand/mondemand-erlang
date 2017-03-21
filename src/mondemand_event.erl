@@ -11,6 +11,8 @@
           name/1,
           msg/1,
           set_msg/2,
+          add_contexts/2,
+          add_context/3,
           peek_name_from_udp/1,
           peek_type_from_udp/1,
           to_lwes/1,
@@ -36,6 +38,30 @@ name (#md_event { name = Name }) -> Name.
 
 msg (#md_event { msg = Msg }) -> Msg.
 set_msg (E = #md_event {}, Msg) -> E#md_event {msg = Msg}.
+
+add_contexts (E = #md_event {msg = Msg}, L) when is_list (L) ->
+  NewMsg =
+    case Msg of
+      #md_stats_msg {} -> mondemand_statsmsg:add_contexts (Msg, L);
+      #md_log_msg {} -> mondemand_logmsg:add_contexts (Msg, L);
+      #md_perf_msg {} -> mondemand_perfmsg:add_contexts (Msg, L);
+      #md_annotation_msg {} ->
+        mondemand_annotationmsg:add_contexts (Msg, L);
+      #md_trace_msg {} -> Msg % trace doesn't have contexts
+    end,
+  E#md_event { msg = NewMsg }.
+
+add_context (E = #md_event {msg = Msg}, CK, CV) ->
+  NewMsg =
+    case Msg of
+      #md_stats_msg {} -> mondemand_statsmsg:add_context (Msg, CK, CV);
+      #md_log_msg {} -> mondemand_logmsg:add_context (Msg, CK, CV);
+      #md_perf_msg {} -> mondemand_perfmsg:add_context (Msg, CK, CV);
+      #md_annotation_msg {} ->
+        mondemand_annotationmsg:add_context (Msg, CK, CV);
+      #md_trace_msg {} -> Msg % trace doesn't have contexts
+    end,
+  E#md_event { msg = NewMsg }.
 
 peek_name_from_udp  (Event = {udp, _, _, _, _}) ->
   lwes_event:peek_name_from_udp (Event);

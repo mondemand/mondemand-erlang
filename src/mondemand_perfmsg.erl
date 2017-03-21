@@ -17,6 +17,8 @@
            timing_end_time/1,
            context/1,
            context_value/2,
+           add_contexts/2,
+           add_context/3,
            to_lwes/1,
            from_lwes/1
          ]).
@@ -73,6 +75,18 @@ context_find (Key, Context, Default) ->
     false -> Default;
     {_, H} -> H
   end.
+
+add_contexts (P = #md_perf_msg { num_context = ContextNum,
+                                  context = Context},
+              L) when is_list (L) ->
+  P#md_perf_msg { num_context = ContextNum + length (L),
+                  context = L ++ Context }.
+
+add_context (P = #md_perf_msg { num_context = ContextNum,
+                                context = Context},
+             ContextKey, ContextValue) ->
+  P#md_perf_msg { num_context = ContextNum + 1,
+                  context = [ {ContextKey, ContextValue} | Context ] }.
 
 timings_to_lwes (NumTimings, Timings) ->
   [ { ?LWES_U_INT_16, ?MD_NUM, NumTimings }
