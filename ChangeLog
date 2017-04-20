@@ -1,3 +1,6 @@
+Version 6.8.1 (molinaro)
+  * avoid webmachine dependency
+
 Version 6.8.0 (molinaro)
   * add user state to the mondemand_statdb:map function so that you can do
   the equivalent of mapfold there.

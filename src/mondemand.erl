@@ -321,7 +321,7 @@ flush ({FlushModule, FlushStatePrepFunction, FlushFunction}) ->
                                ),
   Finish = os:timestamp (),
   error_logger:info_msg ("flushing took ~p millis and returned ~p",
-                         [webmachine_util:now_diff_milliseconds (Finish,Start),
+                         [mondemand_util:now_diff_milliseconds (Finish,Start),
                           Ret]),
   Ret.
 

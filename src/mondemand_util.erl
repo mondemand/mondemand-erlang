@@ -34,6 +34,7 @@
           now_to_epoch_millis/1,        % ({_,_,_}) -> MillisSinceEpoch
           now_to_epoch_secs/1,          % ({_,_,_}) -> SecondsSinceEpoch
           now_to_epoch_minutes/1,       % ({_,_,_}) -> MinutesSinceEpoch
+          now_diff_milliseconds/2,
           current/0,
           current_minute/0,
           millis_to_next_round_second/0,
@@ -154,6 +155,42 @@ now_to_epoch_secs ({Mega, Secs, _}) ->
   Mega * ?MEGA + Secs.
 now_to_epoch_minutes (Now) ->
   trunc (now_to_epoch_secs (Now) / 60).
+
+%% NOTE: Copied from webmachine with the mailing list link corrected,
+%% webmachine license is
+%%
+%%    Licensed under the Apache License, Version 2.0 (the "License");
+%%    you may not use this file except in compliance with the License.
+%%    You may obtain a copy of the License at
+%%
+%%        http://www.apache.org/licenses/LICENSE-2.0
+%%
+%%    Unless required by applicable law or agreed to in writing, software
+%%    distributed under the License is distributed on an "AS IS" BASIS,
+%%    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%    See the License for the specific language governing permissions and
+%%    limitations under the License.
+%%
+%% File is/was
+%%
+%% https://github.com/webmachine/webmachine/blob/master/src/webmachine_util.erl
+%%
+%% Test is also copied below
+%%
+%% This is faster than timer:now_diff() because it does not use bignums.
+%% But it returns *milliseconds*  (timer:now_diff returns microseconds.)
+%% From http://erlang.org/pipermail/erlang-questions/2002-June/005037.html
+%%
+%% @doc  Compute the difference between two now() tuples, in milliseconds.
+%% @spec now_diff_milliseconds(now(), now()) -> integer()
+now_diff_milliseconds(undefined, undefined) ->
+  0;
+now_diff_milliseconds(undefined, T2) ->
+  now_diff_milliseconds(os:timestamp(), T2);
+now_diff_milliseconds({M,S,U}, {M,S1,U1}) ->
+  ((S-S1) * 1000) + ((U-U1) div 1000);
+now_diff_milliseconds({M,S,U}, {M1,S1,U1}) ->
+  ((M-M1)*1000000+(S-S1))*1000 + ((U-U1) div 1000).
 
 current () ->
   {{Year, Month, Day},{Hour,Minute,_}} = now_to_mdyhms (os:timestamp()),
@@ -293,5 +330,12 @@ dummy () ->
 -ifdef (TEST).
 -include_lib ("eunit/include/eunit.hrl").
 
+%% Copied from webmachine, see NOTE above
+now_diff_milliseconds_test() ->
+  Late = {10, 10, 10},
+  Early1 = {10, 9, 9},
+  Early2 = {9, 9, 9},
+  ?assertEqual(1000, now_diff_milliseconds(Late, Early1)),
+  ?assertEqual(1000001000, now_diff_milliseconds(Late, Early2)).
 
 -endif.
