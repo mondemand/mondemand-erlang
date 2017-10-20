@@ -338,4 +338,61 @@ now_diff_milliseconds_test() ->
   ?assertEqual(1000, now_diff_milliseconds(Late, Early1)),
   ?assertEqual(1000001000, now_diff_milliseconds(Late, Early2)).
 
+stringify_test_ () ->
+  [
+     ?_assertEqual (E, stringify(G))
+     || {G, E}
+     <- [
+          {1, "1"},
+          {1.5, "1.50000000000000000000e+00"},
+          {a, "a"},
+          {"a", "a"},
+          {<<"a">>, <<"a">>}
+        ]
+  ].
+
+binaryify_test_ () ->
+  [
+     ?_assertEqual (E, binaryify(G))
+     || {G, E}
+     <- [
+          {1, <<"1">>},
+          {1.5, <<"1.50000000000000000000e+00">>},
+          {a, <<"a">>},
+          {"a", <<"a">>},
+          {<<"a">>, <<"a">>}
+        ]
+  ].
+
+integerify_test_ () ->
+  [
+     ?_assertEqual (E, integerify(G))
+     || {G, E}
+     <- [
+          {"", undefined},
+          {<<>>, undefined},
+          {1, 1},
+          {1.2, 1},
+          {"1", 1},
+          {<<"1">>, 1},
+          {"a", undefined}
+        ]
+  ].
+
+floatify_test_ () ->
+  [
+     ?_assertEqual (E, floatify(G))
+     || {G, E}
+     <- [
+          {"", undefined},
+          {<<>>, undefined},
+          {1,        1.0},
+          {1.2,      1.2},
+          {<<"1.2">>,1.2},
+          {"1.2",    1.2},
+          {<<"1">>,  1.0},
+          {"a",      undefined}
+        ]
+  ].
+
 -endif.

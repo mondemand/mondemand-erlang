@@ -12,10 +12,7 @@
 %-                                  API                                -
 %-=====================================================================-
 start() ->
-  [ ensure_started (App)
-    || App
-    <- [sasl, syntax_tools, lwes, inets, mondemand]
-  ].
+  application:ensure_all_started (mondemand).
 
 %-=====================================================================-
 %-                        application callbacks                        -
@@ -24,26 +21,25 @@ start(_Type, _StartArgs) ->
   mondemand_sup:start_link().
 
 stop(_State) ->
-    ok.
-
-%-=====================================================================-
-%-                               Private                               -
-%-=====================================================================-
-ensure_started(App) ->
-  case application:start(App) of
-    ok ->
-      ok;
-    {error, {already_started, App}} ->
-      ok;
-    Other ->
-      error_logger:error_msg ("got ~p in ensure_started (~p)",[Other, App]),
-      erlang:error (failed_to_start)
-  end.
+  ok.
 
 %-=====================================================================-
 %-                            Test Functions                           -
 %-=====================================================================-
 -ifdef (TEST).
 -include_lib ("eunit/include/eunit.hrl").
+
+mondemand_app_test_ () ->
+  [
+    fun() ->
+      {R, _} = mondemand_app:start(),
+      ?assertEqual (ok, R)
+    end,
+    ?_assertEqual ({ok, []},mondemand_app:start()),
+    ?_assertEqual (ok, application:stop (mondemand)),
+    fun() ->
+      mondemand_config:clear()
+    end
+  ].
 
 -endif.

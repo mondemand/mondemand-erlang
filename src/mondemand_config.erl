@@ -18,6 +18,7 @@
 % there are currently no comment characters
 %
 -export ([ init/0,
+           clear/0,
            host/0,
            default_max_sample_size/0,
            default_stats/0,
@@ -59,6 +60,10 @@ init () ->
       {ok, M} -> M
     end,
   mondemand_global:put (?MOCHI_MAX_METRICS, MaxMetrics).
+
+clear() ->
+  mondemand_global:delete(?MOCHI_SENDER_HOST),
+  mondemand_global:delete(?MOCHI_MAX_METRICS).
 
 host () ->
   mondemand_global:get (?MOCHI_SENDER_HOST).
