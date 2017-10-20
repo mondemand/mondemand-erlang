@@ -320,9 +320,9 @@ flush ({FlushModule, FlushStatePrepFunction, FlushFunction}) ->
                                 FlushModule:FlushStatePrepFunction()
                                ),
   Finish = os:timestamp (),
-  error_logger:info_msg ("flushing took ~p millis and returned ~p",
-                         [mondemand_util:now_diff_milliseconds (Finish,Start),
-                          Ret]),
+  TotalMillis = mondemand_util:now_diff_milliseconds (Finish,Start),
+  increment (mondemand_erlang, flush_count),
+  increment (mondemand_erlang, flush_total_millis, TotalMillis),
   Ret.
 
 reset_stats () ->
@@ -353,6 +353,10 @@ init([]) ->
       HC -> HC
     end,
   FlushConfig = mondemand_config:flush_config(),
+
+  % initialize a few internal counters
+  increment(mondemand_erlang, flush_count, 0),
+  increment(mondemand_erlang, flush_total_millis, 0),
 
   case mondemand_config:lwes_config () of
     {error, Error} ->
