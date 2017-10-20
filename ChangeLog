@@ -1,3 +1,6 @@
+Version 6.9.1 (molinaro)
+  * forgot to bump the version in the .app.src
+
 Version 6.9.0 (molinaro)
   * don't print out info about flushing, instead just keep a metric.
   * better unit test coverage
