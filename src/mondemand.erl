@@ -368,7 +368,7 @@ init([]) ->
             case Interval =/= 0 of
               true ->
                 % use milliseconds for jitter
-                J = crypto:rand_uniform (1, IntervalSecs) * 1000,
+                J = rand:uniform (IntervalSecs - 1) * 1000,
 
                 % shoot for starting flushes some time after the next
                 % round minute

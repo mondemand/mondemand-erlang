@@ -388,7 +388,7 @@ add_sample (ProgId, Key, Context, Value) ->
         %
         % But say if you have collected 500 updates for 100 slots it will
         % be replaced 1/5 percent of the time.
-        IndexToReplace = crypto:rand_uniform (1,UpdateCount),
+        IndexToReplace = rand:uniform (UpdateCount - 1),
         case IndexToReplace =< Max of
           true -> IndexToReplace;
           false -> skip

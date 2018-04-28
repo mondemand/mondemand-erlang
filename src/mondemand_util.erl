@@ -317,7 +317,7 @@ listen (Config) ->
                ok).
 
 dummy () ->
-  N = random:uniform (100),
+  N = rand:uniform (100),
   [ mondemand:add_sample(foo,stuff,I)
    || I <- lists:seq (1,N)
   ],

@@ -10,6 +10,13 @@ deps=
 for d in deps/* ; do
   deps="$deps -pa $d/ebin"
 done
+for d in _checkouts/* ; do
+  deps="$deps -pa $d/ebin"
+done
+for d in _build/default/lib/* ; do
+  deps="$deps -pa $d/ebin"
+done
+
 exec erl \
   -name md_client -setcookie md \
   $deps \
