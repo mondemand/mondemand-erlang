@@ -41,6 +41,9 @@
 -define (DEFAULT_STATS, [min, max, sum, count]).
 -define (DEFAULT_MINUTES_TO_KEEP, 10).
 -define (DEFAULT_MAX_METRICS, 512).
+-define (DEFAULT_SEND_HOST_PORT,{"127.0.0.1", 11211}).
+
+-define (TYPES, [stats, perf, log, trace, annotation]).
 
 -define (MOCHI_SENDER_HOST, mondemand_sender_host_global).
 -define (MOCHI_MAX_METRICS, mondemand_max_metrics_global).
@@ -94,10 +97,10 @@ lwes_config () ->
   case application:get_env (mondemand, lwes_channel) of
     {ok, {H,P}} when is_list (H), is_integer (P) ->
       % allow old config style to continue to work
-      [ {T, {1,[{H,P}]}} || T <- [ stats, perf, log, trace, annotation ] ];
+      [ {T, {1,[{H,P}]}} || T <- ?TYPES ];
     {ok, {N, L}} when is_integer (N), is_list (L) ->
       % allow old config style to continue to work
-      [ {T, {N, L} } || T <- [ stats, perf, log, trace, annotation ] ];
+      [ {T, {N, L} } || T <- ?TYPES ];
     {ok, Config} when is_list (Config) ->
       case valid_config (Config) of
         false ->
@@ -108,9 +111,19 @@ lwes_config () ->
     undefined ->
       case application:get_env (mondemand, config_file) of
         {ok, File} ->
-          parse_config (File);
+          case parse_config (File) of
+            {error, enoent} ->
+              error_logger:warning_msg (
+                "Config File ~p missing, using default of ~p~n",
+                [File, ?DEFAULT_SEND_HOST_PORT]),
+              [ {T, {1,[?DEFAULT_SEND_HOST_PORT]}} || T <- ?TYPES ];
+            FinalConfig -> FinalConfig
+          end;
         undefined ->
-          {error, no_lwes_channel_configured}
+          error_logger:warning_msg (
+            "No lwes channel configured, using default of ~p~n",
+            [?DEFAULT_SEND_HOST_PORT]),
+          [ {T, {1,[?DEFAULT_SEND_HOST_PORT]}} || T <- ?TYPES ]
       end
   end.
 
@@ -119,7 +132,7 @@ valid_config (Config) when is_list (Config) ->
                  lists:keymember (T, 1, Config) andalso A
                end,
                true,
-               [stats, perf, log, trace, annotation]).
+               ?TYPES).
 
 
 parse_config (File) ->
@@ -137,7 +150,7 @@ parse_config (File) ->
                       end } | A ]
             end,
             [],
-            [ stats, perf, log, trace, annotation])
+            ?TYPES)
       end
   end.
 

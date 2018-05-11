@@ -1,161 +1,165 @@
-Version 6.9.2 (molinaro)
-  * minor fixes to compile without warnings under erlang 20
+* Mon May 14 2018 Anthony Molinaro (djnym) 6.9.3
+- Switch ChangeLog format to semi-standard RPM format
+- Fallback to a default config if the config file is not found
 
-Version 6.9.1 (molinaro)
-  * forgot to bump the version in the .app.src
+* Sat Apr 28 2018 Anthony Molinaro (djnym) 6.9.2
+- minor fixes to compile without warnings under erlang 20
 
-Version 6.9.0 (molinaro)
-  * don't print out info about flushing, instead just keep a metric.
-  * better unit test coverage
+* Fri Oc 20 2017 Anthony Molinaro (djnym) 6.9.1
+- forgot to bump the version in the .app.src
 
-Version 6.8.1 (molinaro)
-  * avoid webmachine dependency
+* Fri Oct 20 2017 Anthony Molinaro (djnym) 6.9.0
+- don't print out info about flushing, instead just keep a metric.
+- better unit test coverage
 
-Version 6.8.0 (molinaro)
-  * add user state to the mondemand_statdb:map function so that you can do
-  the equivalent of mapfold there.
-  * alter flushing to use an initial state function
-  * added a convience function for adding contexts to events which support
-  them to mondemand_event.
+* Thu Apr 20 2017 Anthony Molinaro (djnym) 6.8.1
+- avoid webmachine dependency
 
-Version 6.7.0 (molinaro)
-  * generalize flush functionality so that the server can plug in a slightly
-  modified version.
-  * cleanup some config, all application config should be read only in
-  mondemand_config
+* Tue Mar 21 2017 Anthony Molinaro (djnym) 6.8.0
+- add user state to the mondemand_statdb:map function so that you can do
+the equivalent of mapfold there.
+- alter flushing to use an initial state function
+- added a convience function for adding contexts to events which support
+them to mondemand_event.
 
-Version 6.6.1 (molinaro)
-  * make sure that mondemand vmstats metrics are not emitted without a full
-  interval having gone by.  This means a restart of a service can lead to
-  a gap in vmstats, but that's better than the spikes which can happen with
-  out waiting (IMHO).
+* Mon Mar 06 2017 Anthony Molinaro (djnym) 6.7.0
+- generalize flush functionality so that the server can plug in a slightly
+modified version.
+- cleanup some config, all application config should be read only in
+mondemand_config
 
-Version 6.6.0 (molinaro)
-  * add scheduler utilization to vmstats
+* Fri Feb 03 2017 Anthony Molinaro (djnym) 6.6.1
+- make sure that mondemand vmstats metrics are not emitted without a full
+interval having gone by.  This means a restart of a service can lead to
+a gap in vmstats, but that's better than the spikes which can happen without
+waiting (IMHO).
 
-Version 6.5.0 (molinaro)
-  * add a call to get vmstats out from the vmstats sampler
-  * add a call to get all event names
+* Thu Feb 02 2017 Anthony Molinaro (djnym) 6.6.0
+- add scheduler utilization to vmstats
 
-Version 6.4.1 (molinaro)
-  * don't crash if http trace endpoint is not set
+* Thu Oct 06 2016 Anthony Molinaro (djnym) 6.5.0
+- add a call to get vmstats out from the vmstats sampler
+- add a call to get all event names
 
-Version 6.4.0 (molinaro)
-  * now able to post traces over 65kb
-  * updated the version of lwes dependency
+* Mon Sep 19 2016 Anthony Molinaro (djnym) 6.4.1
+- don't crash if http trace endpoint is not set
 
-Version 6.3.0 (molinaro)
-  * fix median calculation where there is only one sample (since this is
-    ill defined, it will be set to zero)
-  * add fetch_sample_set/4 to allow fetching a sample set from a previous
-    minute
+* Mon Sep 19 2016 Vikram Kadi (vikramkadi) 6.4.0
+- now able to post traces over 65kb
+- updated the version of lwes dependency
 
-Version 6.2.1 (whalen)
-  * moved max_metrics constant to mondemand_config so we can tweak at runtime
+* Tue Aug 02 2016 Anthony Molinaro (djnym) 6.3.0
+- fix median calculation where there is only one sample (since this is
+ill defined, it will be set to zero)
+- add fetch_sample_set/4 to allow fetching a sample set from a previous
+minute
 
-Version 6.2.0 (molinaro)
-  * added a function to convert from millis since epoch to erlang:now/0
-  format
+* Fri Jun 10 2016 Tim Whalen (whalen) 6.2.1
+- moved max_metrics constant to mondemand_config so we can tweak at runtime
 
-Version 6.1.0 (whalen)
-  * when sending stats emit multiple lwes events when num_metrics is large
+* Thu Jun 09 2016 Anthony Molinaro (djnym) 6.2.0
+- added a function to convert from millis since epoch to erlang:now/0
+format
 
-Version 6.0.0 (molinaro)
-  * significantly improved performance when deserializing stats events
-  * improved coverage of mondemand_statsmsg as well as mondemand_event
-  * removed some unused fields from currently unused records, but since they
-  were in the public header
+* Wed Jun 01 2016 Tim Whalen (whalen) 6.1.0
+- when sending stats emit multiple lwes events when num_metrics is large
 
-Version 5.8.0 (molinaro)
-  * significantly improved performance when deserializing performance events
-  * improved coverage of mondemand_perfmsg module
+* Thu May 12 2016 Anthony Molinaro (djnym) 6.0.0
+- significantly improved performance when deserializing stats events
+- improved coverage of mondemand_statsmsg as well as mondemand_event
+- removed some unused fields from currently unused records, but since they
+were in the public header
 
-Version 5.7.1 (molinaro)
-  * minor dialyzer issue
+* Fri Feb 26 2016 Anthony Molinaro (djnym) 5.8.0
+- significantly improved performance when deserializing performance events
+- improved coverage of mondemand_perfmsg module
 
-Version 5.7.0 (molinaro)
-  * add annotation message support
-  * add accessors for performance messages
-  * fix for R15B port calls
+* Fri Feb 05 2016 Anthony Molinaro (djnym) 5.7.1
+- minor dialyzer issue
 
-Version 5.6.0 (molinaro)
-  * add port count and limit to vmstats
+* Fri Feb 05 2016 Anthony Molinaro (djnym) 5.7.0
+- add annotation message support
+- add accessors for performance messages
+- fix for R15B port calls
 
-Version 5.5.2 (molinaro)
-  * syntax_tools needs to be in the required apps
+* Fri Dec 04 2015 Anthony Molinaro (djnym) 5.6.0
+- add port count and limit to vmstats
 
-Version 5.5.1 (molinaro)
-  * performance trace deserialization was broken
+* Thu Dec 03 2015 Anthony Molinaro (djnym) 5.5.2
+- syntax_tools needs to be in the required apps
 
-Version 5.5.0 (molinaro)
-  * vmstats can now be sent once a minute via mondemand when specified in the
-    application config file.  A program id is required so a minimal config
-    might be something like
-      { vmstats, [ { program_id, mondemand } ] }
-    in addition a context could be added via a context parameter with a
-    2-tuple list as an argument like
-      { vmstats, [ { program_id, mondemand }, {context, [{foo,bar}]} ] }
+* Mon Nov 23 2015 Anthony Molinaro (djnym) 5.5.1
+- performance trace deserialization was broken
 
-Version 5.4.2 (molinaro)
-  * problem with context deserialization
+* Wed Oct 28 2015 Anthony Molinaro (djnym) 5.5.0
+- vmstats can now be sent once a minute via mondemand when specified in the
+application config file.  A program id is required so a minimal config
+might be something like
+{ vmstats, [ { program_id, mondemand } ] }
+in addition a context could be added via a context parameter with a
+2-tuple list as an argument like
+{ vmstats, [ { program_id, mondemand }, {context, [{foo,bar}]} ] }
 
-Version 5.4.1 (molinaro)
-  * missing file in 5.4.0 release, as well as some additions to the
+* Tue Oct 27 2015 Anthony Molinaro (djnym) 5.4.2
+- problem with context deserialization
+
+* Fri Oct 09 2015 Anthony Molinaro (djnym) 5.4.1
+- missing file in 5.4.0 release, as well as some additions to the
 performance tracing event.  Added contexts and a caller_label
 
-Version 5.4.0 (molinaro)
-  * support performance messages as well as allowing sending of different
-  events to different channels.
+* Thu Oct 08 2015 Anthony Molinaro (djnym) 5.4.0
+- support performance messages as well as allowing sending of different
+events to different channels.
 
-Version 5.3.1 (molinaro)
-  * typo in restart code meant hot-restarts were failing with bad_ip_port
+* Fri Sep 18 2015 Anthony Molinaro (djnym) 5.3.1
+- typo in restart code meant hot-restarts were failing with bad_ip_port
 
-Version 5.3.0 (molinaro)
-  * allow more than one previous minute to be kept
+* Thu Aug 20 2015 Anthony Molinaro (djnym) 5.3.0
+- allow more than one previous minute to be kept
 
-Version 5.2.0 (molinaro)
-  * allow host sent in events to be overriden by an application env variable
-  and stored in a global (copied mochiglobal into the mondemand application).
-  * added collect_time which is the time that statsets were collected.
+* Mon Jul 13 2015 Anthony Molinaro (djnym) 5.2.0
+- allow host sent in events to be overriden by an application env variable
+and stored in a global (copied mochiglobal into the mondemand application).
+- added collect_time which is the time that statsets were collected.
 
-Version 5.1.0 (molinaro)
-  * added interface for gauges
-  * cap counters to max signed int64 as that's what lwes is doing
-  * allow for multiple configs in config file to emit to multiple servers
-  * added an mondemand_stats module which centralizes operations around stats
-  * added statset which collects samples in a reservoir and emits a
-  configurable amount of statistics each emit interval
+* Fri Jul 18 2014 Anthony Molinaro (djnym) 5.1.0
+- added interface for gauges
+- cap counters to max signed int64 as that's what lwes is doing
+- allow for multiple configs in config file to emit to multiple servers
+- added an mondemand_stats module which centralizes operations around stats
+- added statset which collects samples in a reservoir and emits a
+configurable amount of statistics each emit interval
 
-Version 5.0.0 (molinaro)
-  * serialization of events now happens in calling process instead of while
-  sending
-  * make send_interval an application variable so you can change it from 60
-  seconds if you want
-  * mondemand:stats/0 now adds context when it's available
-  * trace messages now always use dicts internally to better match other
-  languages implementations
+* Fri Mar 14 2014 Anthony Molinaro (djnym) 5.0.0
+- serialization of events now happens in calling process instead of while
+sending
+- make send_interval an application variable so you can change it from 60
+seconds if you want
+- mondemand:stats/0 now adds context when it's available
+- trace messages now always use dicts internally to better match other
+languages implementations
 
-Version 4.1.1 (molinaro)
-  * updated dependency on version of lwes
+* Wed Feb 19 2014 Anthony Molinaro (djnym) 4.1.1
+- updated dependency on version of lwes
 
-Version 4.1.0 (molinaro)
-  * added a mondemand:stats/0 function to pretty-print stats
-  * updated dependency on version of lwes
+* Fri Feb 14 2014 Anthony Molinaro (djnym) 4.1.0
+- added a mondemand:stats/0 function to pretty-print stats
+- updated dependency on version of lwes
 
-Version 4.0.0 (molinaro)
-  * Trace messages now require a string message to be sent
+* Mon Mar 28 2011 Anthony Molinaro (djnym) 4.0.0
+- Trace messages now require a string message to be sent
 
-Version 3.0.0 (molinaro)
-  * Update to deal with new lwes-erlang
-  * Added trace messages
-  * removed send_event call from public API, use trace messages instead
-  * sync version with other clients
+* Mon Mar 21 2011 Anthony Molinaro (djnym) 3.0.0
+- Update to deal with new lwes-erlang
+- Added trace messages
+- removed send_event call from public API, use trace messages instead
+- sync version with other clients
 
-Version 1.3.0 (molinaro)
-  * Default types to counters when increment has been used, otherwise allow it
-  to be set when sending stats
-  * fix bug with context num
+* Fri Feb 04 2011 Anthony Molinaro (djnym) 1.3.0
+- Default types to counters when increment has been used, otherwise allow it
+to be set when sending stats
+- fix bug with context num
 
-Version 1.2.0 (molinaro)
-  * initial version, originally in another non-public repo, so versioning
-    reflects an upgrade from that version
+* Wed Jan 26 2011 Anthony Molinaro (djnym) 1.2.0
+- initial version, originally in another non-public repo, so versioning
+reflects an upgrade from that version
