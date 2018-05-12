@@ -1,3 +1,6 @@
+* Tue May 15 2018 Anthony Molinaro (djnym) 6.9.4
+- have version in .app.src come from ChangeLog
+
 * Mon May 14 2018 Anthony Molinaro (djnym) 6.9.3
 - Switch ChangeLog format to semi-standard RPM format
 - Fallback to a default config if the config file is not found
