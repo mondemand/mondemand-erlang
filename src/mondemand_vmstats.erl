@@ -59,6 +59,7 @@
                       memory_atom,
                       memory_binary,
                       memory_ets,
+                      memory_literal,
                       process_count,
                       process_limit,
                       port_count,
@@ -112,6 +113,7 @@ metric_from_sample (Metric, Sample) ->
     memory_atom -> {Metric, Sample#vm_sample.memory_atom};
     memory_binary -> {Metric, Sample#vm_sample.memory_binary};
     memory_ets -> {Metric, Sample#vm_sample.memory_ets};
+    memory_literal -> {Metric, Sample#vm_sample.memory_literal};
     process_count -> {Metric, Sample#vm_sample.process_count};
     process_limit -> {Metric, Sample#vm_sample.process_limit};
     port_count -> {Metric, Sample#vm_sample.port_count};
@@ -268,6 +270,7 @@ collect_sample (Legacy, CollectSchedulerStats) ->
   AtomUsed = proplists:get_value(atom_used, Memory),
   BinaryMemory = proplists:get_value(binary, Memory),
   EtsMemory = proplists:get_value(ets, Memory),
+  LiteralMemory = get_literal_memory_size(),
   ProcessCount = erlang:system_info(process_count),
   ProcessLimit = erlang:system_info(process_limit),
 
@@ -302,6 +305,7 @@ collect_sample (Legacy, CollectSchedulerStats) ->
     memory_atom = AtomUsed,
     memory_binary = BinaryMemory,
     memory_ets = EtsMemory,
+    memory_literal = LiteralMemory,
     process_count = ProcessCount,
     process_limit = ProcessLimit,
     port_count = PortCount,
@@ -338,6 +342,7 @@ to_mondemand (#vm_sample {
                memory_atom = AtomUsed,
                memory_binary = BinaryMemory,
                memory_ets = EtsMemory,
+               memory_literal = LiteralMemory,
                process_count = ProcessCount,
                process_limit = ProcessLimit,
                port_count = PortCount,
@@ -361,6 +366,7 @@ to_mondemand (#vm_sample {
       { gauge, memory_atom, AtomUsed },
       { gauge, memory_binary, BinaryMemory },
       { gauge, memory_ets, EtsMemory },
+      { gauge, memory_literal, LiteralMemory },
       { gauge, process_count, ProcessCount },
       { gauge, process_limit, ProcessLimit },
       { gauge, port_count, PortCount },
@@ -382,10 +388,39 @@ scheduler_wall_time_diff (PrevSchedWallTime, SchedWallTime) ->
     <- lists:zip(lists:sort(PrevSchedWallTime),lists:sort(SchedWallTime))
   ].
 
+% Sum of current carriersizes(mcbs+scbs) for all instances although
+% currently there is only one global instance for literal_alloc.
+get_literal_memory_size () ->
+  lists:foldl(
+    fun
+      ({instance, _N, Instance}, AccLiteralSize) when is_list(Instance) ->
+        CarrierSizeForInstance =
+          lists:map(
+            fun(CarrierSizeType) ->
+              case lists:keyfind(CarrierSizeType, 1, Instance) of
+                {CarrierSizeType, MemDataList} when is_list(MemDataList) ->
+                  case lists:keyfind(carriers_size, 1, MemDataList) of
+                    {
+                     carriers_size,
+                     CurrentSize, _LastMaxSize, _MaxSize
+                    } -> CurrentSize;
+                    _Else -> 0 % Ignore unknown format
+                  end;
+                _Else -> 0 % Ignore unknown format
+              end
+            end, [mbcs, sbcs]),
+        lists:sum(CarrierSizeForInstance) + AccLiteralSize
+     ;(_UnknownFormat, AccLiteralSize) -> AccLiteralSize
+    end, 0, erlang:system_info({allocator, literal_alloc})).
+
 %%--------------------------------------------------------------------
 %%% Test functions
 %%--------------------------------------------------------------------
 -ifdef (TEST).
 -include_lib ("eunit/include/eunit.hrl").
+
+literal_memory_test () ->
+  Size = get_literal_memory_size(),
+  ?assertEqual(true, is_integer(Size) andalso Size =/= 0).
 
 -endif.
