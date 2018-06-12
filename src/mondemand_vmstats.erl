@@ -390,6 +390,9 @@ scheduler_wall_time_diff (PrevSchedWallTime, SchedWallTime) ->
 
 % Sum of current carriersizes(mcbs+scbs) for all instances although
 % currently there is only one global instance for literal_alloc.
+% Note: This function returns constant value zero when OTP version
+% is 18 or before.
+-ifdef (namespaced_types_19_later).
 get_literal_memory_size () ->
   lists:foldl(
     fun
@@ -412,6 +415,10 @@ get_literal_memory_size () ->
         lists:sum(CarrierSizeForInstance) + AccLiteralSize
      ;(_UnknownFormat, AccLiteralSize) -> AccLiteralSize
     end, 0, erlang:system_info({allocator, literal_alloc})).
+-else.
+get_literal_memory_size () -> 0.
+-endif.
+
 
 %%--------------------------------------------------------------------
 %%% Test functions
@@ -419,8 +426,13 @@ get_literal_memory_size () ->
 -ifdef (TEST).
 -include_lib ("eunit/include/eunit.hrl").
 
+-ifdef(namespaced_types_19_later).
 literal_memory_test () ->
   Size = get_literal_memory_size(),
   ?assertEqual(true, is_integer(Size) andalso Size =/= 0).
+-else.
+literal_memory_test () ->
+  ?assertEqual(0, get_literal_memory_size()).
+-endif.
 
 -endif.
