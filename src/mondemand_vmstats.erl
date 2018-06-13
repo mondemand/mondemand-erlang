@@ -390,9 +390,9 @@ scheduler_wall_time_diff (PrevSchedWallTime, SchedWallTime) ->
 
 % Sum of current carriersizes(mcbs+scbs) for all instances although
 % currently there is only one global instance for literal_alloc.
-% Note: This function returns constant value zero when OTP version
-% is 18 or before.
--ifdef (namespaced_types_19_later).
+% Note: This function returns constant value zero when allocator stats are
+% not available.
+-ifdef (allocator_stats_available).
 get_literal_memory_size () ->
   lists:foldl(
     fun
@@ -426,7 +426,7 @@ get_literal_memory_size () -> 0.
 -ifdef (TEST).
 -include_lib ("eunit/include/eunit.hrl").
 
--ifdef(namespaced_types_19_later).
+-ifdef(allocator_stats_available).
 literal_memory_test () ->
   Size = get_literal_memory_size(),
   ?assertEqual(true, is_integer(Size) andalso Size =/= 0).
