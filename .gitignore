@@ -4,4 +4,3 @@ ebin
 .eunit
 .rebar
 _build
-rebar.lock

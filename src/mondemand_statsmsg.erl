@@ -440,7 +440,19 @@ zip_and_find_host ([], [], Host, Context) ->
 zip_and_find_host ([{K, <<"host">>} | Keys], [{K, Host} | Vals], _, Context) ->
   zip_and_find_host (Keys, Vals, Host, Context);
 zip_and_find_host ([{K, Key} | Keys ], [{K, Val} | Vals ], Host, Context) ->
-  zip_and_find_host (Keys, Vals, Host, [{Key, Val} | Context]).
+  zip_and_find_host (Keys, Vals, Host, [{Key, Val} | Context]);
+zip_and_find_host (L1 = [{K1, Key} | Keys ],
+                   L2 = [{K2, Val} | Vals],
+                   Host, Context) ->
+  % error case, there's something missing so we will log and drop it
+  case K1 < K2 of
+    true ->
+      % we have a key but no value, so just add an empty context for the key
+      zip_and_find_host(Keys, L2, Host, [{Key, missing} | Context]);
+    false ->
+      % we have a context but no key! So make something up
+      zip_and_find_host(L1, Vals, Host, [{missing, Val} | Context])
+  end.
 
 process ([],
          ReceiptTime,
@@ -1787,6 +1799,48 @@ index (<<"1024">>) -> 1025.
 -ifdef (TEST).
 -include_lib ("eunit/include/eunit.hrl").
 
+% we had the situation where some events were being constructed improperly
+% and deserialization was crashing so here's a bad stats msg to test
+% against.
+bad_event1() ->
+  #lwes_event { name = <<"MonDemand::StatsMsg">>,
+                attrs =
+                 [ {string,<<"prog_id">>,<<"foo">>},
+                   {int16,<<"enc">>,1}, % ignored as this is not used
+
+                   {uint16,<<"num">>,1},
+                   {string,<<"t0">>,<<"counter">>},
+                   {string,<<"k0">>,<<"blank">>},
+                   {int64,<<"v0">>,0},
+                   {uint16,<<"ctxt_num">>,3},
+                   {string,<<"ctxt_k0">>,<<"host">>},
+                   {string,<<"ctxt_v0">>,<<"localhost">>},
+                   {string,<<"ctxt_k1">>,<<"p">>},
+                   % notice the missing ctxt_v1 here
+                   {string,<<"ctxt_k2">>,<<"s">>},
+                   {string,<<"ctxt_v2">>, <<"bar">>}
+                 ]
+  }.
+bad_event2() ->
+  #lwes_event { name = <<"MonDemand::StatsMsg">>,
+                attrs =
+                 [ {string,<<"prog_id">>,<<"foo">>},
+                   {int16,<<"enc">>,1}, % ignored as this is not used
+
+                   {uint16,<<"num">>,1},
+                   {string,<<"t0">>,<<"counter">>},
+                   {string,<<"k0">>,<<"blank">>},
+                   {int64,<<"v0">>,0},
+                   {uint16,<<"ctxt_num">>,3},
+                   {string,<<"ctxt_k0">>,<<"host">>},
+                   {string,<<"ctxt_v0">>,<<"localhost">>},
+                   % notice the missing ctxt_k1 here
+                   {string,<<"ctxt_v1">>,<<"p">>},
+                   {string,<<"ctxt_k2">>,<<"s">>},
+                   {string,<<"ctxt_v2">>, <<"bar">>}
+                 ]
+  }.
+
 statsmsg_test_ () ->
   [
     { "basic constructor test",
@@ -2081,6 +2135,19 @@ statsmsg_test_ () ->
               lwes_event:from_binary(lwes_event:to_binary(E2),list)),
         ?assertEqual (prog_id (S1), prog_id (S2)),
         ?assertEqual (lists:sort(context(S1)), lists:sort(context (S2)))
+      end
+    },
+    { "malformed events",
+      fun() ->
+        % missing value for key
+        {0, B1} =
+          from_lwes (
+            lwes_event:from_binary(lwes_event:to_binary(bad_event1()),list)),
+        ?assertEqual( context_value(B1, <<"p">>), missing),
+        {0, B2} =
+          from_lwes (
+            lwes_event:from_binary(lwes_event:to_binary(bad_event2()),list)),
+        ?assertEqual( context_value(B2, missing), <<"p">>)
       end
     }
   ].

@@ -1,4 +1,9 @@
-* Fri Jun 8 2018 Yoshihiro Tanaka (yoshi) 6.10.0
+* Fri Dec 14 2018 Anthony Molinaro (djnym) 6.10.1
+- use rebar3 in Makefile
+- fix for when statsmsg contexts are mismatched, the library will no longer
+crash
+
+* Fri Jun 08 2018 Yoshihiro Tanaka (yoshi) 6.10.0
 - Add literal memory usage stat
 
 * Tue May 15 2018 Anthony Molinaro (djnym) 6.9.4

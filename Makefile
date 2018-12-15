@@ -1,22 +1,30 @@
+NAME=mondemand
+
+REBAR3=rebar3
 all:
-	@rebar get-deps compile
+	$(REBAR3) compile
 
-perf:
-	@(cd tests ; erlc -I../src -I../include *.erl)
+dialyzer:
+	$(REBAR3) as test do dialyzer
 
-edoc:
-	@rebar skip_deps=true doc
+test:
+	$(REBAR3) as test do dialyzer,eunit,cover
 
-check:
-	@rm -rf .eunit
-	@mkdir -p .eunit
-	@dialyzer --src src -I deps -pa deps/parse_trans/ebin
-	@rebar skip_deps=true eunit
+# Compile and run unit test for individual modules: 'make test-oxgw_util'
+# or 'make test-oxgw_util test-oxgw_request'
+test-%: src/%.erl
+	$(REBAR3) as test do eunit -m $*
+
+name:
+	@echo $(NAME)
+
+version:
+	@echo $(shell awk 'match($$0, /[0-9]+\.[0-9]+(\.[0-9]+)+/){print substr($$0, RSTART,RLENGTH); exit}' ChangeLog)
 
 clean:
-	@rebar clean
+	if test -d _build; then $(REBAR3) clean; fi
 
-maintainer-clean:
-	@rebar clean
-	@rebar delete-deps
-	@rm -rf deps
+maintainer-clean: clean
+	rm -rf _build
+
+.PHONY:  all test name version clean maintainer-clean
