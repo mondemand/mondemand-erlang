@@ -90,6 +90,7 @@ send_interval () ->
   end.
 
 lwes_config () ->
+  io:format("finding config ~n",[]),
   % lwes config can be specified in one of two ways
   %   1. the lwes_channel application variable
   %   2. from the file referenced by the config_file application variable
@@ -117,7 +118,8 @@ lwes_config () ->
                 "Config File ~p missing, using default of ~p~n",
                 [File, ?DEFAULT_SEND_HOST_PORT]),
               [ {T, {1,[?DEFAULT_SEND_HOST_PORT]}} || T <- ?TYPES ];
-            FinalConfig -> FinalConfig
+            FinalConfig ->
+              FinalConfig
           end;
         undefined ->
           error_logger:warning_msg (
@@ -134,18 +136,20 @@ valid_config (Config) when is_list (Config) ->
                true,
                ?TYPES).
 
-
 parse_config (File) ->
-  case read_file (File) of
+  % read and parse the file
+  case read_and_parse_file (File) of
     {error, E} -> {error, E};
-    Bin ->
-      case parse_star_config (Bin) of
+    Config ->
+      % get the default config by using the default prefix
+      case find_prefix_config (type_to_prefix(default), Config) of
         {error, E } -> {error, E};
-        Config ->
+        DefaultConfig ->
+          % then check for overrides by type
           lists:foldl (
             fun (T,A) ->
-                [ {T, case parse_type_config (Bin, T) of
-                        {error, _} -> Config;
+                [ {T, case find_prefix_config (type_to_prefix(T), Config) of
+                        {error, _} -> DefaultConfig;
                         C -> C
                       end } | A ]
             end,
@@ -154,58 +158,47 @@ parse_config (File) ->
       end
   end.
 
-parse_star_config (File) ->
-  parse_prefix_config ("MONDEMAND_", File).
+type_to_prefix (default) -> "MONDEMAND_";
+type_to_prefix (perf) -> "MONDEMAND_PERF_";
+type_to_prefix (stats) -> "MONDEMAND_STATS_";
+type_to_prefix (log) -> "MONDEMAND_LOG_";
+type_to_prefix (trace) -> "MONDEMAND_TRACE_";
+type_to_prefix (annotation) -> "MONDEMAND_ANNOTATION_".
 
-parse_type_config (File, perf) ->
-  parse_prefix_config ("MONDEMAND_PERF_", File);
-parse_type_config (File, stats) ->
-  parse_prefix_config ("MONDEMAND_STATS_", File);
-parse_type_config (File, log) ->
-  parse_prefix_config ("MONDEMAND_LOG_", File);
-parse_type_config (File, trace) ->
-  parse_prefix_config ("MONDEMAND_TRACE_", File);
-parse_type_config (File, annotation) ->
-  parse_prefix_config ("MONDEMAND_ANNOTATION_", File).
-
-
-parse_value (Prefix, Suffix, Line) ->
-  parse_value (Prefix, Suffix, Line, undefined).
-
-parse_value (Prefix, Suffix, Line, Default) ->
-  case re:run (Line, Prefix ++ Suffix ++ "=\"([^\"]+)\"",
-               [{capture, all_but_first, list}]) of
-    nomatch -> Default;
-    {match, [H]} ->
-      case string:tokens (H, " ,") of
-        [] -> Default;
-        H1 -> H1
-      end
-  end.
-
-coerce (undefined, _) -> undefined;
-coerce (L = [[_|_]|_], T) ->
-  [ case T of
-      list -> E;
-      integer -> list_to_integer (E)
-    end || E <- L
-  ].
-
-single (undefined) -> undefined;
-single ([H]) -> H.
-
-read_file (File) ->
+read_and_parse_file (File) ->
   case file:read_file (File) of
-    {ok, Bin} -> Bin;
+    {ok, Bin} ->
+      case mondemand_config_scanner:string(binary_to_list(Bin)) of
+        {ok,Tokens,_} ->
+          % add in an eof token so there is always one
+          case mondemand_config_parser:parse(Tokens++[{eof,100000}]) of
+            {ok, Res} -> Res;
+            {error, {Line,mondemand_config_parser,_}} ->
+              {error, {parse_error, Line}}
+          end;
+        {error,{Line,mondemand_config_scanner,_},_} ->
+          {error, {scan_error, Line}}
+      end;
     E -> E
   end.
 
-parse_prefix_config (Prefix, Bin) ->
-  HostOrHosts = coerce (parse_value (Prefix, "ADDR", Bin), list),
-  PortOrPorts = coerce (parse_value (Prefix, "PORT", Bin), integer),
-  TTLOrTTLs = coerce (parse_value (Prefix, "TTL", Bin), integer),
-  MaybeSendTo =
-    single (coerce (parse_value (Prefix, "SENDTO", Bin), integer)),
+find_entry (Key, Config) ->
+  case lists:keyfind (Key, 1, Config) of
+    false -> undefined;
+    {_, V} -> V
+  end.
+
+find_prefix_config (Prefix, Config) ->
+  HostOrHosts = find_entry (Prefix ++ "ADDR", Config),
+  PortOrPorts = find_entry (Prefix ++ "PORT", Config),
+  TTLOrTTLs = find_entry (Prefix ++ "TTL", Config),
+  MaybeSendTo = case find_entry (Prefix ++ "SENDTO", Config) of
+                  [I] when is_integer(I) -> I;
+                  O -> O  % FIXME: probably should fix in parser
+                end,
+  combiner (HostOrHosts, PortOrPorts, TTLOrTTLs, MaybeSendTo).
+
+combiner (HostOrHosts, PortOrPorts, TTLOrTTLs, MaybeSendTo) ->
   case is_list (HostOrHosts)
        andalso is_list (PortOrPorts)
        andalso (TTLOrTTLs =:= undefined orelse is_list (TTLOrTTLs))
@@ -264,15 +257,15 @@ build ([],_,_,A) ->
 build ([Host|RestHosts], [Port], undefined, A) ->
   build (RestHosts, [Port], undefined, [ {Host, Port} | A ]);
 build ([Host|RestHosts], [Port], [TTL], A) ->
-  build (RestHosts, [Port], [TTL], [ {Host, Port, TTL} | A ]);
+  build (RestHosts, [Port], [TTL], [ {Host, Port, [{ttl,TTL}]} | A ]);
 build ([Host|RestHosts], [Port], [TTL|RestTTLs], A) ->
-  build (RestHosts, [Port], RestTTLs, [ {Host, Port, TTL} | A ]);
+  build (RestHosts, [Port], RestTTLs, [ {Host, Port, [{ttl,TTL}]} | A ]);
 build ([Host|RestHosts], [Port|RestPorts], undefined, A) ->
   build (RestHosts, RestPorts, undefined, [ {Host, Port} | A ]);
 build ([Host|RestHosts], [Port|RestPorts], [TTL], A) ->
-  build (RestHosts, RestPorts, [TTL], [ {Host, Port, TTL} | A ]);
+  build (RestHosts, RestPorts, [TTL], [ {Host, Port, [{ttl,TTL}]} | A ]);
 build ([Host|RestHosts], [Port|RestPorts], [TTL|RestTTLs], A) ->
-  build (RestHosts, RestPorts, RestTTLs, [ {Host, Port, TTL} | A ]).
+  build (RestHosts, RestPorts, RestTTLs, [ {Host, Port, [{ttl,TTL}]} | A ]).
 
 minutes_to_keep () ->
   case application:get_env (mondemand, minutes_to_keep) of
@@ -378,20 +371,20 @@ config_file_test_ () ->
     [
       % delete any files from failed tests
       fun () -> DeleteConfig () end,
-      fun () -> ok = WriteConfig ("localhost", 20602, undefined) end,
-      ?_assertEqual ([{annotation,{1,[{"localhost",20602}]}},
-                      {trace,{1,[{"localhost",20602}]}},
-                      {log,{1,[{"localhost",20602}]}},
-                      {perf,{1,[{"localhost",20602}]}},
-                      {stats,{1,[{"localhost",20602}]}}],
+      fun () -> ok = WriteConfig ("127.0.0.1", 20602, undefined) end,
+      ?_assertEqual ([{annotation,{1,[{"127.0.0.1",20602}]}},
+                      {trace,{1,[{"127.0.0.1",20602}]}},
+                      {log,{1,[{"127.0.0.1",20602}]}},
+                      {perf,{1,[{"127.0.0.1",20602}]}},
+                      {stats,{1,[{"127.0.0.1",20602}]}}],
                      parse_config (ConfigFile)),
       fun () -> ok = DeleteConfig () end,
-      fun () -> ok = WriteConfig ("localhost", 20602, 3) end,
-      ?_assertEqual ([{annotation,{1,[{"localhost",20602,3}]}},
-                      {trace,{1,[{"localhost",20602,3}]}},
-                      {log,{1,[{"localhost",20602,3}]}},
-                      {perf,{1,[{"localhost",20602,3}]}},
-                      {stats,{1, [{"localhost",20602,3}]}}],
+      fun () -> ok = WriteConfig ("127.0.0.1", 20602, 3) end,
+      ?_assertEqual ([{annotation,{1,[{"127.0.0.1",20602,[{ttl,3}]}]}},
+                      {trace,{1,[{"127.0.0.1",20602,[{ttl,3}]}]}},
+                      {log,{1,[{"127.0.0.1",20602,[{ttl,3}]}]}},
+                      {perf,{1,[{"127.0.0.1",20602,[{ttl,3}]}]}},
+                      {stats,{1, [{"127.0.0.1",20602,[{ttl,3}]}]}}],
                       parse_config (ConfigFile)),
       fun () -> ok = DeleteConfig () end
     ]
