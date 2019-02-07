@@ -90,7 +90,6 @@ send_interval () ->
   end.
 
 lwes_config () ->
-  io:format("finding config ~n",[]),
   % lwes config can be specified in one of two ways
   %   1. the lwes_channel application variable
   %   2. from the file referenced by the config_file application variable

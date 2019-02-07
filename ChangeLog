@@ -1,3 +1,7 @@
+* Thu Feb 07 2019 Anthony Molinaro (djnym) 6.11.0
+- update lwes library
+- added a more robust mondemand.conf file parser
+
 * Fri Dec 14 2018 Anthony Molinaro (djnym) 6.10.1
 - use rebar3 in Makefile
 - fix for when statsmsg contexts are mismatched, the library will no longer

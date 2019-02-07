@@ -1,0 +1,8 @@
+[{<<"lwes">>,
+  {git,"git://github.com/lwes/lwes-erlang.git",
+       {ref,"d6ce9ab486cfaadb8231dda771cb6bc8cc6c88df"}},
+  0},
+ {<<"parse_trans">>,
+  {git,"git://github.com/uwiger/parse_trans.git",
+       {ref,"f22fbf4982bc541518d4a9b3ad305810460724e5"}},
+  0}].
