@@ -346,7 +346,7 @@ flush_config () ->
 %%--------------------------------------------------------------------
 %%% Test functions
 %%--------------------------------------------------------------------
-%-ifdef (TEST).
+-ifdef (TEST).
 -include_lib ("eunit/include/eunit.hrl").
 
 config_file_test_ () ->
@@ -390,4 +390,44 @@ config_file_test_ () ->
     ]
   }.
 
-%-endif.
+canned_config_file_test_ () ->
+  [
+    ?_assertEqual(Expected, parse_config(ConfigFile))
+    || {Expected, ConfigFile}
+    <- [
+         { [{annotation,{1,[{"239.5.1.1",10201,[{ttl,25}]}]}},
+            {trace,{1,[{"239.5.1.1",10201,[{ttl,25}]}]}},
+            {log,{1,[{"239.5.1.1",10201,[{ttl,25}]}]}},
+            {perf,{2,[{"10.5.27.41",11211},{"10.5.30.40",11211}]}},
+            {stats,{1,[{"239.5.1.1",10201,[{ttl,25}]}]}}],
+           "tests/mondemand1.conf" },
+         { [{annotation,{1,[{"127.0.0.1",11211,[{ttl,25}]}]}},
+            {trace,{1,[{"127.0.0.1",11211,[{ttl,25}]}]}},
+            {log,{1,[{"127.0.0.1",11211,[{ttl,25}]}]}},
+            {perf,{1,[{"127.0.0.1",11211,[{ttl,25}]}]}},
+            {stats,{1,[{"127.0.0.1",11211,[{ttl,25}]}]}}],
+           "tests/mondemand2.conf" },
+         {{error,bad_config}, "tests/mondemand3.conf"},
+         { [{annotation,{1,[{"239.1.1.1",10201,[{ttl,25}]}]}},
+            {trace,{1,[{"239.1.1.1",10201,[{ttl,25}]}]}},
+            {log,{1,[{"239.1.1.1",10201,[{ttl,25}]}]}},
+            {perf,{2,[{"10.5.27.41",11211},{"10.5.30.40",11211}]}},
+            {stats,{1,[{"239.1.1.1",10201,[{ttl,25}]}]}}],
+           "tests/mondemand4.conf" },
+         { [{annotation,{1,[{"10.5.42.19",20402,[{ttl,25}]}]}},
+            {trace,{1,[{"10.5.42.19",20402,[{ttl,25}]}]}},
+            {log,{1,[{"10.5.42.19",20402,[{ttl,25}]}]}},
+            {perf,{1,[{"10.5.42.19",20402,[{ttl,25}]}]}},
+            {stats,{1,[{"10.5.42.19",20402,[{ttl,25}]}]}}],
+           "tests/mondemand5.conf" },
+         {{error,{scan_error,5}}, "tests/mondemand6.conf"},
+         {{error,bad_config}, "tests/mondemand7.conf"},
+         {[{annotation,{1,[{"127.0.0.1",20602}]}},
+           {trace,{1,[{"127.0.0.1",20602}]}},
+           {log,{1,[{"127.0.0.1",20602}]}},
+           {perf,{1,[{"127.0.0.1",20602}]}},
+           {stats,{1,[{"127.0.0.1",20602}]}}], "tests/mondemand8.conf"}
+       ]
+  ].
+
+-endif.
