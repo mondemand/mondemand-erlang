@@ -48,6 +48,10 @@
            % statsets
            add_sample/3,  % (ProgId, Key, Value)
            add_sample/4,  % (ProgId, Key, [{ContextKey,ContextValue}], Value)
+           % counters that emit metrics as gauges
+           gincrement/2,  % (ProgId, Key)
+           gincrement/3,  % (ProgId, Key, Increment)
+           gincrement/4,  % (ProgId, Key, [{ContextKey,ContextValue}], Increment)
 
            % tracing functions
            send_trace/3,
@@ -133,6 +137,18 @@ add_sample (ProgId, Key, Value) ->
 add_sample (ProgId, Key, Context, Value)
   when is_integer (Value), is_list (Context) ->
   mondemand_statdb:add_sample (ProgId, Key, Context, Value).
+
+gincrement (ProgId, Key) ->
+  gincrement (ProgId, Key, [], 1).
+
+gincrement (ProgId, Key, Context) when is_list (Context) ->
+  gincrement (ProgId, Key, Context, 1);
+gincrement (ProgId, Key, Amount) when is_integer (Amount) ->
+  gincrement (ProgId, Key, [], Amount).
+
+gincrement (ProgId, Key, Context, Amount)
+  when is_list (Context), is_integer (Amount) ->
+  mondemand_statdb:gincrement (ProgId, Key, Context, Amount).
 
 
 all () ->

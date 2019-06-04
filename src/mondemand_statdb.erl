@@ -57,6 +57,10 @@
           remove_counter/2,
           remove_counter/3,
 
+          % gcounter functions
+          create_gcounter/4,
+          gincrement/4,
+
           % gauge functions
           create_gauge/2,
           create_gauge/3,
@@ -214,6 +218,52 @@ try_update_counter (InternalKey =
           {ok, V}
       end
   end.
+
+
+-record(md_gcounter,
+        { first_time :: integer(),
+          key :: #mdkey{},                      % Must be in same position as #md_metric.key.
+          value :: non_neg_integer(),
+          previous_value :: integer() }).
+
+create_gcounter (ProgId, Key, Context, Amount)
+  when is_list(Context), is_integer(Amount) ->
+  create_gcounter (calculate_key (ProgId, Context, counter, Key), Amount).
+
+create_gcounter (InternalKey, Amount) ->
+  add_new_config (InternalKey, ""),
+  NewGCounter = #md_gcounter{key = InternalKey,
+                             value = Amount,
+                             first_time = erlang:monotonic_time(),
+                             previous_value = 0},
+  case ets:insert_new (?STATS_TABLE, NewGCounter) of
+    true  -> ok;
+    false -> {error, already_created}
+  end.
+
+gincrement (ProgId, Key, Context, Amount)
+  when is_integer (Amount), is_list (Context) ->
+  InternalKey = calculate_key (ProgId, Context, counter, Key),
+  update_gcounter (InternalKey, Amount).
+
+update_gcounter (InternalKey, Amount) ->
+  Increment = {#md_gcounter.value, Amount, ?MD_STATS_MAX_METRIC_VALUE, 0},
+  try {ok, ets:update_counter (?STATS_TABLE, InternalKey, Increment)}
+  catch
+    %% If the row does not yet exist the ets:update_counter call will throw a
+    %% badarg error, which we catch and insert the row. There is a race
+    %% condition, however, so if we find the row already exist we try the
+    %% update again.  We use this three-step process instead of supplying a
+    %% default object to the original ets:update_counter call so that we avoid
+    %% the erlang:monotonic_time call in the usual case of the row already
+    %% existing.
+    error:badarg ->
+      case create_gcounter (InternalKey, Amount) of
+        ok                       -> {ok, Amount};
+        {error, already_created} -> {ok, ets:update_counter (?STATS_TABLE, InternalKey, Increment)}
+      end
+  end.
+
 
 create_gauge (ProgId, Key) ->
   create_gauge (ProgId, Key, [], "", 0).
@@ -428,7 +478,7 @@ config_exists (Key) ->
 return_if_exists (Key, Table) ->
   case config_exists (Key) of
     true ->
-      #md_metric {value = V} = lookup_metric (Key, Table),
+      #md_metric {value = V} = lookup_metric (Key, Table, undefined, undefined),
       V;
     false ->
       undefined
@@ -546,7 +596,9 @@ construct_stats_msg (AllKeys = [#mdkey {prog_id = ProgId, context = Context}|_],
                      #map_state {host = Host,
                                  collect_time = CollectTime,
                                  stats_set_table = Table}) ->
-  Metrics = [ lookup_metric (I, Table) || I <- AllKeys ],
+  SendIntervalSecs = mondemand_config:send_interval(),
+  CurrentTime = erlang:monotonic_time(),
+  Metrics = [ lookup_metric (I, Table, SendIntervalSecs, CurrentTime) || I <- AllKeys ],
   {FinalHost, FinalContext} =
     mondemand_util:context_from_context (Host, Context),
   mondemand_statsmsg:new (mondemand_util:binaryify (ProgId),
@@ -558,9 +610,11 @@ construct_stats_msg (AllKeys = [#mdkey {prog_id = ProgId, context = Context}|_],
                           end,
                           CollectTime).
 
+-define(TIME_UNIT_NATIVE_TO_SECONDS, ct_expand:term(erlang:convert_time_unit(1, seconds, native))).
+
 % this function looks up metrics from the different internal DB's and
 % unboxes them
-lookup_metric (InternalKey = #mdkey {type = Type, key = Key}, Table) ->
+lookup_metric (InternalKey = #mdkey {type = Type, key = Key}, Table, SendIntervalSecs, CurrentTime) ->
   case Type of
     I when I =:= counter; I =:= gauge ->
       case ets:lookup (?STATS_TABLE, InternalKey) of
@@ -571,7 +625,30 @@ lookup_metric (InternalKey = #mdkey {type = Type, key = Key}, Table) ->
         [#md_metric {value = V}] ->
           #md_metric { key = mondemand_util:binaryify (Key),
                        type = I,
-                       value = V }
+                       value = V };
+        [#md_gcounter {value = V, first_time = FirstTime, previous_value = LV}] ->
+          %% If we were passed SendIntervalSecs and CurrentTime, return the
+          %% metric as a gauge.  Otherwise return it as a counter.
+          if
+            is_integer (CurrentTime) andalso is_integer (SendIntervalSecs) ->
+              ets:update_element (?STATS_TABLE, InternalKey,
+                                  {#md_gcounter.previous_value, V}),
+              SendIntervalNative = erlang:convert_time_unit (SendIntervalSecs, seconds, native),
+              GCounterGaugeValue =
+                if
+                  CurrentTime - FirstTime < SendIntervalNative ->
+                    round((V - LV) * ?TIME_UNIT_NATIVE_TO_SECONDS / max(1, (CurrentTime - FirstTime)));
+                  true ->
+                    round((V - LV) / SendIntervalSecs)
+                end,
+              #md_metric { key = mondemand_util:binaryify (Key),
+                           type = gauge,
+                           value = GCounterGaugeValue };
+            true ->
+              #md_metric { key = mondemand_util:binaryify (Key),
+                           type = counter,
+                           value = V }
+          end
       end;
     I when I =:= statset ->
       #config { statistics = Stats } = lookup_config (InternalKey),
@@ -1023,6 +1100,16 @@ config_perf_test_ () ->
       ?_assertEqual (4, fetch_gauge (my_prog1, my_metric1)),
       ?_assertEqual (true, remove_gauge (my_prog1, my_metric1)),
       ?_assertEqual (undefined, fetch_gauge (my_prog1, my_metric1)),
+
+      fun () ->
+        ?assertEqual (#md_metric.key, #md_gcounter.key),
+        ?assertEqual ({ok, 1}, gincrement (my_prog1, gctr, [], 1)),
+        ?assertEqual ({ok, 4}, gincrement (my_prog1, gctr, [], 3)),
+        ?assertEqual (4, fetch_counter(my_prog1, gctr)),
+        Key = calculate_key(my_prog1, [], counter, gctr),
+        ?assertMatch (#md_metric{type = gauge, value = V} when V >= 4,
+                      lookup_metric(Key, ?STATS_TABLE, 60, erlang:monotonic_time ()))
+      end,
 
       % tests using sample sets
       ?_assertEqual (undefined, fetch_sample_set (my_prog1, my_metric1)),
