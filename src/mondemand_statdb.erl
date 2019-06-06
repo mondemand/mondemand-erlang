@@ -57,6 +57,12 @@
           remove_counter/2,
           remove_counter/3,
 
+          % gcounter functions
+          create_gcounter/4,
+          gincrement/4,
+          fetch_gcounter/2,
+          fetch_gcounter/3,
+
           % gauge functions
           create_gauge/2,
           create_gauge/3,
@@ -106,8 +112,10 @@
             code_change/3
           ]).
 
+-type mdtype() :: counter | gauge | statset | gcounter.
+
 -record (state,  {}).
--record (mdkey,  {type, prog_id, context, key}).
+-record (mdkey,  {type :: mdtype(), prog_id, context, key}).
 -record (config, {key,
                   description,
                   max_sample_size,
@@ -183,9 +191,18 @@ remove_counter (ProgId, Key, Context) ->
   remove_metric (InternalKey, ?STATS_TABLE).
 
 update_counter (InternalKey, Amount) when Amount >= 0 ->
-  ets:update_counter (?STATS_TABLE, InternalKey,
-                      {?METRIC_VALUE_INDEX, Amount,
-                       ?MD_STATS_MAX_METRIC_VALUE, 0});
+  %% We do the increment and the limit as separate steps so that we can adjust
+  %% the increment to implement a wrap at the limit.  For example, if the old
+  %% value was 6 and we increment by 4 with a limit of 8 we want the new value
+  %% to be 2 (= 6 + 4 mod 8).
+  case ets:update_counter (?STATS_TABLE, InternalKey,
+                           [ {?METRIC_VALUE_INDEX, Amount},
+                             {?METRIC_VALUE_INDEX, 0, ?MD_STATS_MAX_METRIC_VALUE, 0} ]) of
+    [ Unwrapped, 0 ] -> Wrapped = Unwrapped rem (?MD_STATS_MAX_METRIC_VALUE + 1),
+                        Wrapped > 0 andalso update_counter (InternalKey, Wrapped),
+                        Wrapped;
+    [ Unwrapped, _ ] -> Unwrapped
+  end;
 update_counter (InternalKey, Amount) when Amount < 0 ->
   ets:update_counter (?STATS_TABLE, InternalKey,
                       {?METRIC_VALUE_INDEX, Amount,
@@ -214,6 +231,57 @@ try_update_counter (InternalKey =
           {ok, V}
       end
   end.
+
+
+-record(md_gcounter,
+        { rate :: integer() | 'undefined',
+          key :: #mdkey{},                      % Must be in same position as #md_metric.key.
+          value :: non_neg_integer(),           % Must be in same position as #md_metric.value.
+          previous_value :: non_neg_integer(),
+          previous_time :: integer() }).
+
+create_gcounter (ProgId, Key, Context, Amount)
+  when is_list(Context), is_integer(Amount) ->
+  create_gcounter (calculate_key (ProgId, Context, gcounter, Key), Amount).
+
+create_gcounter (InternalKey, Amount) ->
+  add_new_config (InternalKey, ""),
+  NewGCounter = #md_gcounter{ key = InternalKey,
+                              value = Amount,
+                              previous_value = 0,
+                              previous_time = erlang:monotonic_time() },
+  case ets:insert_new (?STATS_TABLE, NewGCounter) of
+    true  -> ok;
+    false -> {error, already_created}
+  end.
+
+gincrement (ProgId, Key, Context, Amount)
+  when is_integer (Amount), is_list (Context) ->
+  InternalKey = calculate_key (ProgId, Context, gcounter, Key),
+  update_gcounter (InternalKey, Amount).
+
+update_gcounter (InternalKey, Amount) ->
+  try {ok, update_counter (InternalKey, Amount)}
+  catch
+    %% If the row does not yet exist the update_counter call will throw a
+    %% badarg error, which we catch and insert the row. There is a race
+    %% condition, however, so if we find the row already exists we try the
+    %% update again.  We use this three-step process instead of supplying a
+    %% default object to the original ets:update_counter call so that we can
+    %% create the config row.
+    error:badarg ->
+      case create_gcounter (InternalKey, Amount) of
+        ok                       -> {ok, Amount};
+        {error, already_created} -> {ok, update_counter (InternalKey, Amount)}
+      end
+  end.
+
+fetch_gcounter (ProgId, Key) ->
+  fetch_gcounter (ProgId, Key, []).
+fetch_gcounter (ProgId, Key, Context) ->
+  InternalKey = calculate_key (ProgId, Context, gcounter, Key),
+  return_if_exists (InternalKey, ?STATS_TABLE).
+
 
 create_gauge (ProgId, Key) ->
   create_gauge (ProgId, Key, [], "", 0).
@@ -546,7 +614,7 @@ construct_stats_msg (AllKeys = [#mdkey {prog_id = ProgId, context = Context}|_],
                      #map_state {host = Host,
                                  collect_time = CollectTime,
                                  stats_set_table = Table}) ->
-  Metrics = [ lookup_metric (I, Table) || I <- AllKeys ],
+  Metrics = [ begin finalize_metric (I, Table), lookup_metric (I, Table) end || I <- AllKeys ],
   {FinalHost, FinalContext} =
     mondemand_util:context_from_context (Host, Context),
   mondemand_statsmsg:new (mondemand_util:binaryify (ProgId),
@@ -558,11 +626,28 @@ construct_stats_msg (AllKeys = [#mdkey {prog_id = ProgId, context = Context}|_],
                           end,
                           CollectTime).
 
+-define(TIME_UNIT_NATIVE_TO_SECONDS, ct_expand:term(erlang:convert_time_unit(1, seconds, native))).
+
+finalize_metric (InternalKey = #mdkey {type = gcounter}, Table) ->
+  case ets:lookup (Table, InternalKey) of
+    [] -> ok;
+    [#md_gcounter {value = CV, previous_value = PV, previous_time = PT}] ->
+      CT = erlang:monotonic_time(),
+      ValueDelta = (CV - PV + (?MD_STATS_MAX_METRIC_VALUE + 1)) rem (?MD_STATS_MAX_METRIC_VALUE + 1),
+      TimeDelta = max(1, (CT - PT)),
+      Rate = round(ValueDelta * ?TIME_UNIT_NATIVE_TO_SECONDS / TimeDelta),
+      ets:update_element(Table, InternalKey,
+                         [ {#md_gcounter.previous_value, CV},
+                           {#md_gcounter.previous_time, CT},
+                           {#md_gcounter.rate, Rate} ])
+  end;
+finalize_metric (_InternalKey, _Table) -> ok.
+
 % this function looks up metrics from the different internal DB's and
 % unboxes them
 lookup_metric (InternalKey = #mdkey {type = Type, key = Key}, Table) ->
   case Type of
-    I when I =:= counter; I =:= gauge ->
+    I when I =:= counter; I =:= gauge; I =:= gcounter ->
       case ets:lookup (?STATS_TABLE, InternalKey) of
         [] ->
           #md_metric { key = mondemand_util:binaryify (Key),
@@ -571,6 +656,10 @@ lookup_metric (InternalKey = #mdkey {type = Type, key = Key}, Table) ->
         [#md_metric {value = V}] ->
           #md_metric { key = mondemand_util:binaryify (Key),
                        type = I,
+                       value = V };
+        [#md_gcounter {rate = V}] ->
+          #md_metric { key = mondemand_util:binaryify (Key),
+                       type = gauge,
                        value = V }
       end;
     I when I =:= statset ->
@@ -1011,6 +1100,18 @@ config_perf_test_ () ->
       ?_assertEqual (true, remove_counter (my_prog1, my_metric1)),
       ?_assertEqual (undefined, fetch_counter (my_prog1, my_metric1)),
 
+      {"counter wrapping",
+       fun () ->
+         ?assertEqual ({ok, ?MD_STATS_MAX_METRIC_VALUE - 80}, increment (my_prog1, wrapctr, ?MD_STATS_MAX_METRIC_VALUE - 80)),
+         ?assertEqual ({ok, ?MD_STATS_MAX_METRIC_VALUE - 1}, increment (my_prog1, wrapctr, 79)),
+         ?assertEqual ({ok, ?MD_STATS_MAX_METRIC_VALUE}, increment (my_prog1, wrapctr, 1)),
+         ?assertEqual ({ok, 0}, increment (my_prog1, wrapctr, 1)),
+         ?assertEqual ({ok, ?MD_STATS_MAX_METRIC_VALUE - 10}, increment (my_prog1, wrapctr, ?MD_STATS_MAX_METRIC_VALUE - 10)),
+         ?assertEqual ({ok, 3}, increment (my_prog1, wrapctr, 14)),
+         ?assertEqual (true, remove_counter (my_prog1, wrapctr))
+       end
+      },
+
       % tests using create_gauge first
       ?_assertEqual (undefined, fetch_gauge (my_prog1, my_metric1)),
       ?_assertEqual (ok, create_gauge (my_prog1, my_metric1)),
@@ -1023,6 +1124,32 @@ config_perf_test_ () ->
       ?_assertEqual (4, fetch_gauge (my_prog1, my_metric1)),
       ?_assertEqual (true, remove_gauge (my_prog1, my_metric1)),
       ?_assertEqual (undefined, fetch_gauge (my_prog1, my_metric1)),
+
+      {"gcounter",
+       fun () ->
+         ?assertEqual (#md_metric.key, #md_gcounter.key),
+         ?assertEqual (#md_metric.value, #md_gcounter.value),
+         ?assertEqual ({ok, 1}, gincrement (my_prog1, gctr, [], 1)),
+         ?assertEqual ({ok, 4}, gincrement (my_prog1, gctr, [], 3)),
+         ?assertEqual (undefined, fetch_gcounter(my_prog1, gctr)),
+         Key = calculate_key(my_prog1, [], gcounter, gctr),
+         finalize_metric(Key, ?STATS_TABLE),
+         ?assertMatch (V when is_number(V) andalso V >= 4,
+                       fetch_gcounter(my_prog1, gctr)),
+         ?assertMatch (#md_metric{type = gauge, value = V} when is_number(V) andalso V >= 4,
+                       lookup_metric(Key, ?STATS_TABLE)),
+         %% No gincrement in period => rate == 0.
+         finalize_metric(Key, ?STATS_TABLE),
+         ?assertEqual (0, fetch_gcounter(my_prog1, gctr)),
+         %% Test that rate is not negative when counter wraps.
+         gincrement (my_prog1, gctr, [], ?MD_STATS_MAX_METRIC_VALUE - 80),
+         finalize_metric(Key, ?STATS_TABLE),
+         gincrement (my_prog1, gctr, [], 150),
+         finalize_metric(Key, ?STATS_TABLE),
+         ?assertMatch (V when is_number(V) andalso V > 0,
+                      fetch_gcounter(my_prog1, gctr))
+       end
+      },
 
       % tests using sample sets
       ?_assertEqual (undefined, fetch_sample_set (my_prog1, my_metric1)),
