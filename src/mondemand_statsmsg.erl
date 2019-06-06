@@ -429,11 +429,13 @@ string_to_type (L) when is_list(L) ->
   string_to_type (list_to_binary (L));
 string_to_type (<<"gauge">>)   -> gauge;
 string_to_type (<<"counter">>) -> counter;
-string_to_type (<<"statset">>) -> statset.
+string_to_type (<<"statset">>) -> statset;
+string_to_type (<<"unknown">>) -> unknown.
 
 type_to_string (gauge)   -> <<"gauge">>;
 type_to_string (counter) -> <<"counter">>;
-type_to_string (statset) -> <<"statset">>.
+type_to_string (statset) -> <<"statset">>;
+type_to_string (unknown) -> <<"unknown">>.
 
 zip_and_find_host ([], [], Host, Context) ->
   { Host, Context };
