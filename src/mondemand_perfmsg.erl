@@ -316,6 +316,40 @@ perfmsg_test_ () ->
               lwes_event:from_binary(lwes_event:to_binary(to_lwes(P)),list)))
       end
     },
+    { "basic constructor test with contexts",
+      fun () ->
+        P = new (<<"foo">>, <<"bar">>, [{<<"baz">>,5,10}]),
+        ?assertEqual (<<"foo">>, id(P)),
+        ?assertEqual (<<"bar">>,caller_label(P)),
+        ?assertEqual (1, num_timings(P)),
+        [ T ] = timings(P),
+        ?assertEqual (<<"baz">>,timing_label (T)),
+        ?assertEqual (5, timing_start_time (T)),
+        ?assertEqual (10, timing_end_time (T)),
+        ?assertEqual ([],context (P)),
+        ?assertEqual ({0, P},
+          from_lwes(
+              lwes_event:from_binary(lwes_event:to_binary(to_lwes(P)),list))),
+        P2 = add_context(P, <<"ck0">>, <<"cv0">>),
+        ?assertEqual ([{<<"ck0">>,<<"cv0">>}], context(P2)),
+        ?assertEqual ({0, P2},
+          from_lwes(
+              lwes_event:from_binary(lwes_event:to_binary(to_lwes(P2)),list))),
+        P3 = add_contexts(P2, [{<<"ck2">>,<<"cv2">>},{<<"ck1">>,<<"cv1">>}]),
+        ?assertEqual ([{<<"ck2">>,<<"cv2">>},
+                       {<<"ck1">>,<<"cv1">>},
+                       {<<"ck0">>,<<"cv0">>}], context(P3)),
+        % sort order seems to change with serialize/deserialize test, so
+        % check with them sorted
+        {0, P4} =
+          from_lwes(
+                lwes_event:from_binary(lwes_event:to_binary(to_lwes(P3)),list)),
+        P5 = P3#md_perf_msg { context = lists:sort(P3#md_perf_msg.context) },
+        P6 = P4#md_perf_msg { context = lists:sort(P4#md_perf_msg.context) },
+        ?assertEqual (P5, P6)
+      end
+    },
+
     { "basic constructor multi-test",
       fun () ->
         P = new (<<"foo">>, <<"bar">>, [{<<"baz">>,5,10},{<<"bob">>,6,8}]),

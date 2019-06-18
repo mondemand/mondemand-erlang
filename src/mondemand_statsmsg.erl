@@ -2065,6 +2065,11 @@ statsmsg_test_ () ->
         ?assertEqual (undefined, statset_from_string ("::")),
         ?assertEqual (gauge, string_to_type ("gauge")),
         ?assertEqual (gauge, string_to_type (<<"gauge">>)),
+        % unknown exists in some other implementations and is here for
+        % completeness
+        ?assertEqual (unknown, string_to_type ("unknown")),
+        ?assertEqual (unknown, string_to_type (<<"unknown">>)),
+        ?assertEqual (<<"unknown">>, type_to_string(unknown)),
         NewEvent = E1#lwes_event {
                      attrs = [{?LWES_INT_64, ?MD_RECEIPT_TIME, 5}
                               | E1#lwes_event.attrs ]},
