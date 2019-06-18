@@ -234,9 +234,9 @@ try_update_counter (InternalKey =
 
 
 -record(md_gcounter,
-        { rate :: integer() | 'undefined',
-          key :: #mdkey{},                      % Must be in same position as #md_metric.key.
-          value :: non_neg_integer(),           % Must be in same position as #md_metric.value.
+        { rate = 0 :: integer(),
+          key :: #mdkey{},            % Must be in same position as #md_metric.key.
+          value :: non_neg_integer(), % Must be in same position as #md_metric.value.
           previous_value :: non_neg_integer(),
           previous_time :: integer() }).
 
@@ -1076,7 +1076,7 @@ minute_tab (59) -> md_min_59.
 %-=====================================================================-
 %-                            Test Functions                           -
 %-=====================================================================-
-%-ifdef (TEST).
+-ifdef (TEST).
 -include_lib ("eunit/include/eunit.hrl").
 
 setup () ->
@@ -1090,8 +1090,6 @@ cleanup (Pid) -> exit (Pid, normal).
 
 % need to randomly create config keys and test looking them up in a sorted
 % fashion  (basically test set versus ordered_set for a bunch of metrics)
-%random_atom
-
 config_perf_test_ () ->
   { setup,
     fun setup/0,
@@ -1111,6 +1109,20 @@ config_perf_test_ () ->
       ?_assertEqual (true, remove_counter (my_prog1, my_metric1)),
       ?_assertEqual (undefined, fetch_counter (my_prog1, my_metric1)),
 
+      % test creation with descriptions
+      ?_assertEqual (ok, create_counter (my_prog1, my_metric2, "with description")),
+      ?_assertEqual ({ok,1}, increment (my_prog1, my_metric2)),
+      ?_assertEqual (1, fetch_counter (my_prog1, my_metric2)),
+      ?_assertEqual (true, remove_counter (my_prog1, my_metric2)),
+      ?_assertEqual (undefined, fetch_counter (my_prog1, my_metric2)),
+
+      % test with contexts and descriptions
+      ?_assertEqual (ok, create_counter (my_prog1, my_metric3, [{foo,bar}], "with context")),
+      ?_assertEqual ({ok,1}, increment (my_prog1, my_metric3,[{foo,bar}])),
+      ?_assertEqual (1, fetch_counter (my_prog1, my_metric3,[{foo,bar}])),
+      ?_assertEqual (true, remove_counter (my_prog1, my_metric3,[{foo,bar}])),
+      ?_assertEqual (undefined, fetch_counter (my_prog1, my_metric3,[{foo,bar}])),
+
       % test using automatic creation of counters
       ?_assertEqual (undefined, fetch_counter (my_prog1, my_metric1)),
       ?_assertEqual ({ok,1}, increment (my_prog1, my_metric1)),
@@ -1126,6 +1138,12 @@ config_perf_test_ () ->
          ?assertEqual ({ok, 0}, increment (my_prog1, wrapctr, 1)),
          ?assertEqual ({ok, ?MD_STATS_MAX_METRIC_VALUE - 10}, increment (my_prog1, wrapctr, ?MD_STATS_MAX_METRIC_VALUE - 10)),
          ?assertEqual ({ok, 3}, increment (my_prog1, wrapctr, 14)),
+         ?assertEqual ({ok, 0}, increment (my_prog1, wrapctr, -3)),
+         ?assertEqual ({ok, ?MD_STATS_MIN_METRIC_VALUE}, increment (my_prog1, wrapctr, ?MD_STATS_MIN_METRIC_VALUE)),
+         ?assertEqual ({ok, 0}, increment (my_prog1, wrapctr, -1)),
+         % always wrap to zero
+         ?assertEqual ({ok, ?MD_STATS_MIN_METRIC_VALUE}, increment (my_prog1, wrapctr, ?MD_STATS_MIN_METRIC_VALUE)),
+         ?assertEqual ({ok, 0}, increment (my_prog1, wrapctr, -10)),
          ?assertEqual (true, remove_counter (my_prog1, wrapctr))
        end
       },
@@ -1147,9 +1165,10 @@ config_perf_test_ () ->
        fun () ->
          ?assertEqual (#md_metric.key, #md_gcounter.key),
          ?assertEqual (#md_metric.value, #md_gcounter.value),
+         ?assertEqual (undefined, fetch_gcounter(my_prog1, gctr)),
          ?assertEqual ({ok, 1}, gincrement (my_prog1, gctr, [], 1)),
          ?assertEqual ({ok, 4}, gincrement (my_prog1, gctr, [], 3)),
-         ?assertEqual (undefined, fetch_gcounter(my_prog1, gctr)),
+         ?assertEqual (0, fetch_gcounter(my_prog1, gctr)),
          Key = calculate_key(my_prog1, [], gcounter, gctr),
          finalize_metric(Key, ?STATS_TABLE),
          ?assertMatch (V when is_number(V) andalso V >= 4,
@@ -1247,4 +1266,4 @@ config_perf_test_ () ->
     ]
   }.
 
-%-endif.
+-endif.
