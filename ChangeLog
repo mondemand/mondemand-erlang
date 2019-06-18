@@ -1,3 +1,6 @@
+* Tue Jun 18 2019 David Hull <david.hull@openx.com> 6.12.1
+- Initialize gcounter rate to 0.
+
 * Tue Jun 4 2019 David Hull <david.hull@openx.com> 6.12.0
 - Add gcounter type, a counter which emits values like a gauge.
 

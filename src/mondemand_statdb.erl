@@ -234,7 +234,7 @@ try_update_counter (InternalKey =
 
 
 -record(md_gcounter,
-        { rate :: integer() | 'undefined',
+        { rate = 0 :: integer(),
           key :: #mdkey{},                      % Must be in same position as #md_metric.key.
           value :: non_neg_integer(),           % Must be in same position as #md_metric.value.
           previous_value :: non_neg_integer(),
@@ -1129,9 +1129,10 @@ config_perf_test_ () ->
        fun () ->
          ?assertEqual (#md_metric.key, #md_gcounter.key),
          ?assertEqual (#md_metric.value, #md_gcounter.value),
+         ?assertEqual (undefined, fetch_gcounter(my_prog1, gctr)),
          ?assertEqual ({ok, 1}, gincrement (my_prog1, gctr, [], 1)),
          ?assertEqual ({ok, 4}, gincrement (my_prog1, gctr, [], 3)),
-         ?assertEqual (undefined, fetch_gcounter(my_prog1, gctr)),
+         ?assertEqual (0, fetch_gcounter(my_prog1, gctr)),
          Key = calculate_key(my_prog1, [], gcounter, gctr),
          finalize_metric(Key, ?STATS_TABLE),
          ?assertMatch (V when is_number(V) andalso V >= 4,
