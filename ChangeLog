@@ -1,5 +1,13 @@
-* Tue Jun 4 2019 David Hull <david.hull@openx.com> 6.12.0
+* Tue Jun 18 2019 Anthony Molinaro <anthony.molinaro@openx.com> 6.12.1
+- rename some confusing names
+- get mondemand_statdb:config() to print out parts of md_config table
+- make sure gcounters are read from the appropriate table
+- initialize gcounter rate to 0
+- improve code coverage on a couple modules
+
+* Tue Jun 04 2019 David Hull <david.hull@openx.com> 6.12.0
 - Add gcounter type, a counter which emits values like a gauge.
+- Add unknown type in statsmsg to match other libraries.
 
 * Thu Feb 07 2019 Anthony Molinaro (djnym) 6.11.0
 - update lwes library

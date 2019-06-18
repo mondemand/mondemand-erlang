@@ -3,6 +3,7 @@ deps
 ebin
 .eunit
 .rebar
+.rebar3
 _*
 src/mondemand_config_parser.erl
 src/mondemand_config_scanner.erl

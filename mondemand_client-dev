@@ -8,5 +8,4 @@ exec erl \
   $deps \
   -pa ebin \
   -config mondemand_client_dev.config \
-  -s reloader \
   -s mondemand_app
