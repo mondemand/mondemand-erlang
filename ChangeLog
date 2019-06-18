@@ -2,7 +2,8 @@
 - rename some confusing names
 - get mondemand_statdb:config() to print out parts of md_config table
 - make sure gcounters are read from the appropriate table
-- Initialize gcounter rate to 0
+- initialize gcounter rate to 0
+- improve code coverage on a couple modules
 
 * Tue Jun 04 2019 David Hull <david.hull@openx.com> 6.12.0
 - Add gcounter type, a counter which emits values like a gauge.
