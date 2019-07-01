@@ -54,7 +54,8 @@
           from_lwes/1,
           statset_from_string/1,
           statset_to_list/1,
-          statset_to_string/1
+          statset_to_string/1,
+          to_prometheus/1
         ]).
 
 % Context is of the form
@@ -216,6 +217,95 @@ from_lwes (#lwes_event { attrs = Data}) ->
                   }
   }.
 
+context_to_prometheus ([]) ->
+  <<"">>;
+context_to_prometheus (Context) ->
+  [
+    <<"{">>,
+      mondemand_util:join([ [mondemand_util:stringify(K),
+                             <<"=\"">>, mondemand_util:stringify(V), <<"\"">>]
+                            || {K, V} <- lists:sort(Context) ],
+                          <<",">>),
+    <<"}">>
+  ].
+
+% this function normalizes the name according to the prometheus naming
+% rules.  These suggest that counters end with _total, so if it's a counter
+% we'll first check to see if it already ends with '_total' and if not add
+% it to the final name.
+normalize_prometheus_name (Type, ProgramId, Key) when is_binary(Key) ->
+  normalize_prometheus_name (Type, ProgramId, binary_to_list(Key));
+normalize_prometheus_name (Type, ProgramId, Key) ->
+  case Type of
+    T when T =:= gauge ; T =:= statset -> [ProgramId, "_", Key];
+    counter ->
+      case lists:reverse(Key) of
+        [ $l,$a,$t,$o,$t,$_ | _] -> [ProgramId, "_", Key];
+        _ -> [ProgramId, "_", Key, "_total"]
+      end
+  end.
+
+metric_to_prometheus (ProgramId, Context,
+                      #md_metric { key = Name, type = counter,
+                                   value = Value, description = Description },
+                      _CollectTime) ->
+  FinalName = normalize_prometheus_name(counter,ProgramId,Name),
+  [ <<"# TYPE ">>, FinalName,<<" counter\n">>,
+    <<"# HELP ">>, FinalName,<<" ">>,Description,<<"\n">>,
+    FinalName, context_to_prometheus (Context),
+      <<" ">>, mondemand_util:stringify(Value,<<"0">>),<<"\n">> ];
+metric_to_prometheus (ProgramId, Context,
+                      #md_metric { key = Name, type = gauge,
+                                   value = Value, description = Description },
+                      _CollectTime) ->
+  FinalName = normalize_prometheus_name(gauge,ProgramId,Name),
+  [ <<"# TYPE ">>, FinalName,<<" gauge\n">>,
+    <<"# HELP ">>, FinalName,<<" ">>,Description,<<"\n">>,
+    FinalName, context_to_prometheus (Context),
+      <<" ">>, mondemand_util:stringify(Value,<<"0">>),<<"\n">> ];
+metric_to_prometheus (ProgramId, Context,
+                      #md_metric { key = Name, type = statset,
+                                   value = StatSet, description = Description },
+                      CollectTime) ->
+  FinalName = normalize_prometheus_name(statset,ProgramId,Name),
+  % use CollectTime in this case as it's a minute ago for statsets
+  [ <<"# TYPE ">>, FinalName,<<" summary\n">>,
+    <<"# HELP ">>, FinalName,<<" ">>,Description,<<"\n">>,
+    FinalName, context_to_prometheus([{<<"quantile">>,<<"0.5">>} | Context]),
+      <<" ">>,mondemand_util:stringify(StatSet#md_statset.median,<<"0">>),
+      <<" ">>,mondemand_util:stringify(CollectTime),<<"\n">>,
+    FinalName, context_to_prometheus([{<<"quantile">>,<<"0.75">>} | Context]),
+      <<" ">>,mondemand_util:stringify(StatSet#md_statset.pctl_75,<<"0">>),
+      <<" ">>,mondemand_util:stringify(CollectTime),<<"\n">>,
+    FinalName, context_to_prometheus([{<<"quantile">>,<<"0.90">>} | Context]),
+      <<" ">>,mondemand_util:stringify(StatSet#md_statset.pctl_90,<<"0">>),
+      <<" ">>,mondemand_util:stringify(CollectTime),<<"\n">>,
+    FinalName, context_to_prometheus([{<<"quantile">>,<<"0.95">>} | Context]),
+      <<" ">>,mondemand_util:stringify(StatSet#md_statset.pctl_95,<<"0">>),
+      <<" ">>,mondemand_util:stringify(CollectTime),<<"\n">>,
+    FinalName, context_to_prometheus([{<<"quantile">>,<<"0.98">>} | Context]),
+      <<" ">>,mondemand_util:stringify(StatSet#md_statset.pctl_98,<<"0">>),
+      <<" ">>,mondemand_util:stringify(CollectTime),<<"\n">>,
+    FinalName, context_to_prometheus([{<<"quantile">>,<<"0.99">>} | Context]),
+      <<" ">>,mondemand_util:stringify(StatSet#md_statset.pctl_99,<<"0">>),
+      <<" ">>,mondemand_util:stringify(CollectTime),<<"\n">>,
+    FinalName, context_to_prometheus([{<<"quantile">>,<<"1.0">>} | Context]),
+      <<" ">>,mondemand_util:stringify(StatSet#md_statset.max,<<"0">>),
+      <<" ">>,mondemand_util:stringify(CollectTime),<<"\n">>,
+    FinalName,<<"_sum">>,context_to_prometheus(Context),
+      <<" ">>,mondemand_util:stringify(StatSet#md_statset.sum,<<"0">>),
+      <<" ">>,mondemand_util:stringify(CollectTime),<<"\n">>,
+    FinalName,<<"_count">>,context_to_prometheus(Context),
+      <<" ">>,mondemand_util:stringify(StatSet#md_statset.count,<<"0">>),
+      <<" ">>,mondemand_util:stringify(CollectTime),<<"\n">>
+  ].
+
+to_prometheus (#md_stats_msg{ prog_id = ProgramId,
+                              collect_time = CollectTime,
+                              context = Context,
+                              metrics = Metrics }) ->
+  [ metric_to_prometheus(ProgramId, Context, Metric, CollectTime) || Metric <- Metrics ].
+
 to_lwes (L) when is_list (L) ->
   MaxMetrics = mondemand_config:max_metrics (),
   lists:flatten (lists:map (fun (X) -> to_lwes (X, MaxMetrics) end, L) );
@@ -281,6 +371,7 @@ to_lwes (MondemandStatsMsg = #md_stats_msg {
 
 to_lwes (MondemandStatsMsg = #md_stats_msg {}, _, EventList) ->
   [ to_lwes (MondemandStatsMsg) | EventList ].
+
 
 metric_to_lwes (MetricIndex,
                 #md_metric { key = Name, type = statset, value = Value }) ->
@@ -2125,14 +2216,14 @@ statsmsg_test_ () ->
         % test that to_lwes of long statsmsg  returns several events that are correct
         [E1, E2] = to_lwes(S),
         % test that the metric counts and first metric in events match expected values
-        ?assert (lists:member({?LWES_U_INT_16, <<"num">>, MaxMetrics}, E1#lwes_event.attrs)),
-        ?assert (lists:member({?LWES_STRING, <<"k0">>, <<"baz1">>}, E1#lwes_event.attrs)),
-        ?assert (lists:member({?LWES_STRING, <<"t0">>, <<"gauge">>}, E1#lwes_event.attrs)),
-        ?assert (lists:member({?LWES_INT_64, <<"v0">>, 1}, E1#lwes_event.attrs)),
-        ?assert (lists:member({?LWES_U_INT_16, <<"num">>, 1}, E2#lwes_event.attrs)),
-        ?assert (lists:member({?LWES_STRING, <<"k0">>, E2K0Name}, E2#lwes_event.attrs)),
-        ?assert (lists:member({?LWES_STRING, <<"t0">>, <<"gauge">>}, E2#lwes_event.attrs)),
-        ?assert (lists:member({?LWES_INT_64, <<"v0">>, MetricsCount}, E2#lwes_event.attrs)),
+        ?assertEqual (true,lists:member({?LWES_U_INT_16, <<"num">>, MaxMetrics}, E1#lwes_event.attrs)),
+        ?assertEqual (true,lists:member({?LWES_STRING, <<"k0">>, <<"baz1">>}, E1#lwes_event.attrs)),
+        ?assertEqual (true,lists:member({?LWES_STRING, <<"t0">>, <<"gauge">>}, E1#lwes_event.attrs)),
+        ?assertEqual (true,lists:member({?LWES_INT_64, <<"v0">>, 1}, E1#lwes_event.attrs)),
+        ?assertEqual (true,lists:member({?LWES_U_INT_16, <<"num">>, 1}, E2#lwes_event.attrs)),
+        ?assertEqual (true,lists:member({?LWES_STRING, <<"k0">>, E2K0Name}, E2#lwes_event.attrs)),
+        ?assertEqual (true,lists:member({?LWES_STRING, <<"t0">>, <<"gauge">>}, E2#lwes_event.attrs)),
+        ?assertEqual (true,lists:member({?LWES_INT_64, <<"v0">>, MetricsCount}, E2#lwes_event.attrs)),
         % test that the prog_id and contexts match in the two lwes events
         {0, S1} =
           from_lwes (

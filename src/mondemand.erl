@@ -34,53 +34,93 @@
 -behaviour (gen_server).
 
 %% API
--export ( [start_link/0,
-           get_state/0,
+-export ([
+  start_link/0,
 
-           % stats functions
-           % counters
-           increment/2,   % (ProgId, Key)
-           increment/3,   % (ProgId, Key, Amount | [{ContextKey,ContextValue}])
-           increment/4,   % (ProgId, Key, Amount | [{ContextKey,ContextValue}], [{ContextKey,ContextValue}]| Amount )
-           % gauges
-           set/3,         % (ProgId, Key, Value)
-           set/4,         % (ProgId, Key, [{ContextKey,ContextValue}], Value)
-           % statsets
-           add_sample/3,  % (ProgId, Key, Value)
-           add_sample/4,  % (ProgId, Key, [{ContextKey,ContextValue}], Value)
-           % counters that emit metrics as gauges
-           gincrement/2,  % (ProgId, Key)
-           gincrement/3,  % (ProgId, Key, Increment)
-           gincrement/4,  % (ProgId, Key, [{ContextKey,ContextValue}], Increment)
+  % ------------ stats functions -----------
+  %
+  % ============ counters =================
+  create_counter/2, % (ProgId, Key)
+  create_counter/3, % (ProgId, Key, [{CtxtKey,CtxtVal}] | Desc)
+  create_counter/4, % (ProgId, Key, [{CtxtKey,CtxtVal}], Desc)
+  create_counter/5, % (ProgId, Key, [{CtxtKey,CtxtVal}], Desc, InitialAmount)
+  increment/2,      % (ProgId, Key)
+  increment/3,      % (ProgId, Key, Amount | [{CtxtKey,CtxtValue}])
+  increment/4,      % (ProgId, Key, Amount | [{CtxtKey,CtxtValue}], [{CtxtKey,CtxtValue}]| Amount )
+  fetch_counter/2,  % (ProgId, Key)
+  fetch_counter/3,  % (ProgId, Key, [{CtxtKey,CtxtValue}])
+  remove_counter/2, % (ProgId, Key)
+  remove_counter/3, % (ProgId, Key, [{CtxtKey,CtxtValue}])
 
-           % tracing functions
-           send_trace/3,
-           send_trace/5,
+  % ============ gauges =================
+  create_gauge/2, % (ProgId, Key)
+  create_gauge/3, % (ProgId, Key, [{CtxtKey,CtxtVal}] | Desc)
+  create_gauge/4, % (ProgId, Key, [{CtxtKey,CtxtVal}], Desc)
+  create_gauge/5, % (ProgId, Key, [{CtxtKey,CtxtVal}], Desc, InitialAmount)
+  set/3,          % (ProgId, Key, Value)
+  set/4,          % (ProgId, Key, [{ContextKey,ContextValue}], Value)
+  fetch_gauge/2,  % (ProgId, Key)
+  fetch_gauge/3,  % (ProgId, Key, [{CtxtKey,CtxtValue}])
+  remove_gauge/2, % (ProgId, Key)
+  remove_gauge/3, % (ProgId, Key, [{CtxtKey,CtxtValue}])
 
-           % performance tracing functions
-           send_perf_info/3,  % (Id, CallerLabel, Timings)
-           send_perf_info/4,  % (Id, CallerLabel, Timings, [{ContextKey,ContextValue}])
-           send_perf_info/5,  % (Id, CallerLabel, Label, StartTime, StopTime)
-           send_perf_info/6,  % (Id, CallerLabel, Label, StartTime, StopTime, [{ContextKey,ContextValue}])
+  % ============ statsets =================
+  create_sample_set/2, % (ProgId, Key)
+  create_sample_set/3, % (ProgId, Key, [{CtxtKey,CtxtVal}] | Desc)
+  create_sample_set/4, % (ProgId, Key, [{CtxtKey,CtxtVal}], Desc)
+  create_sample_set/5, % (ProgId, Key, [{CtxtKey,CtxtVal}], Desc, MaxSamples)
+  create_sample_set/6, % (ProgId, Key, [{CtxtKey,CtxtVal}], Desc, MaxSamples, StatTypeToSend)
 
-           % annotation functions
-           send_annotation/4, % (Id, Timestamp, Description, Text)
-           send_annotation/5, % (Id, Timestamp, Description, Text, [Tag])
-           send_annotation/6, % (Id, Timestamp, Description, Text, [Tag],[{ContextKey,ContextValue}])
+  add_sample/3,        % (ProgId, Key, Value)
+  add_sample/4,        % (ProgId, Key, [{CtxtKey,CtxtValue}], Value)
+  fetch_sample_set/2,  % (ProgId, Key)
+  fetch_sample_set/3,  % (ProgId, Key, [{CtxtKey,CtxtValue}])
+  remove_sample_set/2,  % (ProgId, Key)
+  remove_sample_set/3,  % (ProgId, Key, [{CtxtKey,CtxtValue}])
 
-           % other functions
-           send_stats/3,
-           flush_state_init/0,
-           flush_one_stat/2,
-           reset_stats/0,
-           stats/0,
-           all/0,
-           all_event_names_as_binary/0,
-           get_lwes_config/0,
-           reload_config/0,
-           current_config/0,
-           restart/0
-         ]).
+  % ============ gcounters =================
+  % counters that emit metrics as gauges
+  create_gcounter/2, % (ProgId, Key)
+  create_gcounter/3, % (ProgId, Key, [{CtxtKey,CtxtVal}] | Desc)
+  create_gcounter/4, % (ProgId, Key, [{CtxtKey,CtxtVal}], Desc)
+  create_gcounter/5, % (ProgId, Key, [{CtxtKey,CtxtVal}], Desc, InitialAmount)
+  gincrement/2,      % (ProgId, Key)
+  gincrement/3,      % (ProgId, Key, Increment)
+  gincrement/4,      % (ProgId, Key, [{ContextKey,ContextValue}], Increment)
+  fetch_gcounter/2,  % (ProgId, Key)
+  fetch_gcounter/3,  % (ProgId, Key, [{CtxtKey,CtxtValue}])
+  remove_gcounter/2, % (ProgId, Key)
+  remove_gcounter/3, % (ProgId, Key, [{CtxtKey,CtxtValue}])
+
+  % ------------ tracing functions -----------
+  send_trace/3,
+  send_trace/5,
+
+  % ------------ performance tracing functions -----------
+  send_perf_info/3,  % (Id, CallerLabel, Timings)
+  send_perf_info/4,  % (Id, CallerLabel, Timings, [{ContextKey,ContextValue}])
+  send_perf_info/5,  % (Id, CallerLabel, Label, StartTime, StopTime)
+  send_perf_info/6,  % (Id, CallerLabel, Label, StartTime, StopTime, [{ContextKey,ContextValue}])
+
+  % ------------ annotation functions -----------
+  send_annotation/4, % (Id, Timestamp, Description, Text)
+  send_annotation/5, % (Id, Timestamp, Description, Text, [Tag])
+  send_annotation/6, % (Id, Timestamp, Description, Text, [Tag],[{ContextKey,ContextValue}])
+
+  % ------------ other functions -----------
+  send_stats/3,
+  flush_state_init/0,
+  flush_one_stat/2,
+  reset_stats/0,
+  stats/0,
+  export_as_prometheus/0,
+  all/0,
+  all_event_names_as_binary/0,
+  get_lwes_config/0,
+  reload_config/0,
+  current_config/0,
+  restart/0
+]).
 
 %% gen_server callbacks
 -export ( [ init/1,
@@ -106,31 +146,95 @@
 start_link() ->
   gen_server:start_link ({local, ?MODULE}, ?MODULE, [], []).
 
-get_state() ->
-  gen_server:call (?MODULE, get_state).
+create_counter (ProgId, Key) ->
+  create_counter (ProgId, Key, [], "", 0).
+create_counter (ProgId, Key, Context = [{_,_}|_]) ->
+  create_counter (ProgId, Key, Context, "", 0);
+create_counter (ProgId, Key, Description)
+  when is_list(Description) ; is_binary(Description) ->
+  create_counter (ProgId, Key, [], Description, 0).
+create_counter (ProgId, Key, Context = [{_,_}|_], Description) ->
+  create_counter (ProgId, Key, Context, Description, 0).
+create_counter (ProgId, Key, Context, Description, InitialAmount) ->
+  mondemand_statdb:create_counter (ProgId, Key, Context, Description, InitialAmount).
 
 increment (ProgId, Key) ->
   increment (ProgId, Key, [], 1).
-
 increment (ProgId, Key, Context) when is_list (Context) ->
   increment (ProgId, Key, Context, 1);
 increment (ProgId, Key, Amount) when is_integer (Amount) ->
   increment (ProgId, Key, [], Amount).
-
 % this first clause is just for legacy systems
 increment (ProgId, Key, Amount, Context)
   when is_integer (Amount), is_list (Context) ->
   increment (ProgId, Key, Context, Amount);
 increment (ProgId, Key, Context, Amount)
   when is_integer (Amount), is_list (Context) ->
-  mondemand_statdb:increment (ProgId, Key, Context, Amount).
+  mondemand_statdb:increment_counter (ProgId, Key, Context, Amount).
+
+fetch_counter (ProgId, Key) ->
+  fetch_counter (ProgId, Key, []).
+fetch_counter (ProgId, Key, Context) ->
+  mondemand_statdb:fetch_counter (ProgId, Key, Context).
+
+remove_counter (ProgId, Key) ->
+  remove_counter (ProgId, Key, []).
+remove_counter (ProgId, Key, Context) ->
+  mondemand_statdb:remove_counter (ProgId, Key, Context).
+
+create_gauge (ProgId, Key) ->
+  create_gauge (ProgId, Key, [], "", 0).
+create_gauge (ProgId, Key, Context = [{_,_}|_]) ->
+  create_gauge (ProgId, Key, Context, "", 0);
+create_gauge (ProgId, Key, Description)
+  when is_list(Description) ; is_binary(Description) ->
+  create_gauge (ProgId, Key, [], Description, 0).
+create_gauge (ProgId, Key, Context, Description) ->
+  create_gauge (ProgId, Key, Context, Description, 0).
+create_gauge (ProgId, Key, Context, Description, InitialAmount)
+  when is_integer (InitialAmount), is_list (Context) ->
+  mondemand_statdb:create_gauge (ProgId, Key, Context, Description, InitialAmount).
 
 set (ProgId, Key, Amount) when is_integer (Amount) ->
   set (ProgId, Key, [], Amount).
-
 set (ProgId, Key, Context, Amount)
   when is_integer (Amount), is_list (Context) ->
-  mondemand_statdb:set (ProgId, Key, Context, Amount).
+  mondemand_statdb:set_gauge (ProgId, Key, Context, Amount).
+
+fetch_gauge (ProgId, Key) ->
+  fetch_gauge (ProgId, Key, []).
+fetch_gauge (ProgId, Key, Context) ->
+  mondemand_statdb:fetch_gauge (ProgId, Key, Context).
+
+remove_gauge (ProgId, Key) ->
+  remove_gauge (ProgId, Key, []).
+remove_gauge (ProgId, Key, Context) ->
+  mondemand_statdb:remove_gauge (ProgId, Key, Context).
+
+create_sample_set (ProgId, Key) ->
+  create_sample_set (ProgId, Key, [], "",
+                     mondemand_config:default_max_sample_size(),
+                     mondemand_config:default_stats()).
+create_sample_set (ProgId, Key, Context = [{_,_}|_]) ->
+  create_sample_set (ProgId, Key, Context, "",
+                     mondemand_config:default_max_sample_size(),
+                     mondemand_config:default_stats());
+create_sample_set (ProgId, Key, Description)
+  when is_list(Description) ; is_binary(Description) ->
+  create_sample_set (ProgId, Key, [], Description,
+                     mondemand_config:default_max_sample_size(),
+                     mondemand_config:default_stats()).
+create_sample_set (ProgId, Key, Context, Description) ->
+  create_sample_set (ProgId, Key, Context, Description,
+                     mondemand_config:default_max_sample_size(),
+                     mondemand_config:default_stats()).
+create_sample_set (ProgId, Key, Context, Description, Max) ->
+  create_sample_set (ProgId, Key, Context, Description,
+                     Max,
+                     mondemand_config:default_stats()).
+% Stats can be set to 'all' to include all available summary statistics
+create_sample_set (ProgId, Key, Context, Description, Max, Stats) ->
+  mondemand_statdb:create_sample_set (ProgId, Key, Context, Description, Max, Stats).
 
 add_sample (ProgId, Key, Value) ->
   add_sample (ProgId, Key, [], Value).
@@ -138,18 +242,48 @@ add_sample (ProgId, Key, Context, Value)
   when is_integer (Value), is_list (Context) ->
   mondemand_statdb:add_sample (ProgId, Key, Context, Value).
 
+fetch_sample_set (ProgId, Key) ->
+  fetch_sample_set (ProgId, Key, []).
+fetch_sample_set (ProgId, Key, Context) ->
+  mondemand_statdb:fetch_sample_set (ProgId, Key, Context).
+
+remove_sample_set (ProgId, Key) ->
+  remove_sample_set (ProgId, Key, []).
+remove_sample_set (ProgId, Key, Context) ->
+  mondemand_statdb:remove_sample_set (ProgId, Key, Context).
+
+create_gcounter (ProgId, Key) ->
+  create_gcounter (ProgId, Key, [], "", 0).
+create_gcounter (ProgId, Key, Context = [{_,_}|_]) ->
+  create_gcounter (ProgId, Key, Context, "", 0);
+create_gcounter (ProgId, Key, Description)
+  when is_list(Description) ; is_binary(Description) ->
+  create_gcounter (ProgId, Key, [], Description, 0).
+create_gcounter (ProgId, Key, Context = [{_,_}|_], Description) ->
+  create_gcounter (ProgId, Key, Context, Description, 0).
+create_gcounter (ProgId, Key, Context, Description, InitialAmount)
+  when is_list(Context), is_integer(InitialAmount) ->
+  mondemand_statdb:create_gcounter (ProgId, Key, Context, Description, InitialAmount).
+
 gincrement (ProgId, Key) ->
   gincrement (ProgId, Key, [], 1).
-
 gincrement (ProgId, Key, Context) when is_list (Context) ->
   gincrement (ProgId, Key, Context, 1);
 gincrement (ProgId, Key, Amount) when is_integer (Amount) ->
   gincrement (ProgId, Key, [], Amount).
-
 gincrement (ProgId, Key, Context, Amount)
   when is_list (Context), is_integer (Amount) ->
-  mondemand_statdb:gincrement (ProgId, Key, Context, Amount).
+  mondemand_statdb:increment_gcounter (ProgId, Key, Context, Amount).
 
+fetch_gcounter (ProgId, Key) ->
+  fetch_gcounter (ProgId, Key, []).
+fetch_gcounter (ProgId, Key, Context) ->
+  mondemand_statdb:fetch_gcounter (ProgId, Key, Context).
+
+remove_gcounter (ProgId, Key) ->
+  remove_gcounter (ProgId, Key, []).
+remove_gcounter (ProgId, Key, Context) ->
+  mondemand_statdb:remove_gcounter (ProgId, Key, Context).
 
 all () ->
   mondemand_statdb:all().
@@ -161,6 +295,17 @@ get_lwes_config () ->
 
 stats () ->
   mondemand_statdb:all().
+
+export_as_prometheus () ->
+  % we export a 'minute ago' which actually just effects statsets.  This uses
+  % the previous minutes statset db which will be complete and will export that
+  % time as well
+  mondemand_statdb:map_then (
+    fun (S,A) ->
+      [mondemand_statsmsg:to_prometheus(S) | A]
+    end,
+    [],
+    1).
 
 trace_info_in_dict (Dict) ->
   trace_owner_in_dict (Dict) andalso trace_id_in_dict (Dict).
@@ -371,8 +516,10 @@ init([]) ->
   FlushConfig = mondemand_config:flush_config(),
 
   % initialize a few internal counters
-  increment(mondemand_erlang, flush_count, 0),
-  increment(mondemand_erlang, flush_total_millis, 0),
+  create_counter(mondemand_erlang, flush_count, [],
+                 "The total number of times events have been flushed", 0),
+  create_counter(mondemand_erlang, flush_total_millis, [],
+                 "The total amount of time in milliseconds taken to flush", 0),
 
   case mondemand_config:lwes_config () of
     {error, Error} ->
@@ -412,9 +559,6 @@ init([]) ->
       end
   end.
 
-% just return the state
-handle_call (get_state, _From, State) ->
-  {reply, State, State};
 % restart with currently assigned config
 handle_call (restart, _From,
              State = #state { config = Config,

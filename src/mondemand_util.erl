@@ -16,8 +16,10 @@
 -export ([ find_in_dict/2,
            find_in_dict/3,
            binaryify/1,
+           binaryify/2,
            binaryify_context/1,
            stringify/1,
+           stringify/2,
            integerify/1,
            floatify/1,
            join/2
@@ -222,6 +224,11 @@ millis_to_next_round_minute (Ts) ->
   MillisSinceEpoch = now_to_epoch_millis (Ts),
   NextMinuteSinceEpochAsMillis - MillisSinceEpoch.
 
+binaryify (undefined, Default) when is_binary(Default) ->
+  Default;
+binaryify (B, _) ->
+  binaryify (B).
+
 binaryify (B) when is_binary (B) ->
   B;
 binaryify (O) ->
@@ -229,6 +236,11 @@ binaryify (O) ->
 
 binaryify_context (Context) ->
   [ {binaryify (K), binaryify (V)} || {K,V} <- Context].
+
+stringify (undefined, Default) when is_list(Default) ->
+  Default;
+stringify (V, _) ->
+  stringify(V).
 
 stringify (I) when is_integer (I) ->
   integer_to_list (I);

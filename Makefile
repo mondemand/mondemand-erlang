@@ -25,6 +25,6 @@ clean:
 	if test -d _build; then $(REBAR3) clean; fi
 
 maintainer-clean: clean
-	rm -rf _build
+	rm -rf _build deps ebin tmp _checkouts/*/ebin
 
 .PHONY:  all test name version clean maintainer-clean

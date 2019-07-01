@@ -37,8 +37,29 @@ init([]) ->
         []
     end,
 
+  {ok, Cwd} = file:get_cwd(),
+  HTTPDChild =
+    case mondemand_config:httpd_enabled() of
+      true ->
+        [{mondemand_httpd,
+          {inets, start,
+           [httpd,
+             [{port, mondemand_config:httpd_port()},
+              {bind_address, mondemand_config:httpd_address()},
+              {server_name,"md"},
+              {server_root, Cwd},
+              {document_root, Cwd},
+              {modules, [mondemand_httpd]}
+             ]
+           ]
+          }, permanent, 5000, worker, [mondemand_httpd]
+         }
+        ];
+      false -> []
+    end,
+
   ServiceChildren =
-    VMStatsChild ++
+    VMStatsChild ++ HTTPDChild ++
     [
       { mondemand_statdb,
         {mondemand_statdb, start_link, []},

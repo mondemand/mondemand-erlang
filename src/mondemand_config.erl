@@ -28,6 +28,10 @@
            max_metrics/0,
            parse_config/1,
            get_http_config/0,
+           httpd_enabled/0,
+           httpd_port/0,
+           httpd_address/0,
+           httpd_metrics_endpoint/0,
            vmstats_enabled/0,
            vmstats_prog_id/0,
            vmstats_context/0,
@@ -300,6 +304,21 @@ get_http_config () ->
       end
   end.
 
+httpd_enabled () ->
+  case application:get_env (mondemand, httpd) of
+    {ok, L} when is_list (L) -> true;
+    _ -> false
+  end.
+
+httpd_port () ->
+  get_config_with_default (httpd, port, 31337).
+
+httpd_address () ->
+  get_config_with_default (httpd, bind_address, "0.0.0.0").
+
+httpd_metrics_endpoint () ->
+  get_config_with_default (httpd, metrics_endpoint, "/md/metrics").
+
 vmstats_enabled () ->
   case application:get_env (mondemand, vmstats) of
     {ok, L} when is_list (L) ->
@@ -312,11 +331,11 @@ vmstats_enabled () ->
   end.
 
 vmstats_prog_id () ->
-  vmstats_config (program_id, undefined).
+  get_config_with_default (vmstats, program_id, undefined).
 vmstats_context () ->
-  vmstats_config (context, []).
+  get_config_with_default (vmstats, context, []).
 vmstats_disable_scheduler_wall_time () ->
-  vmstats_config (disable_scheduler_wall_time, false).
+  get_config_with_default (vmstats, disable_scheduler_wall_time, false).
 
 vmstats_legacy_workaround () ->
   case application:get_env(mondemand,r15b_workaround) of
@@ -324,8 +343,8 @@ vmstats_legacy_workaround () ->
     _ -> false
   end.
 
-vmstats_config (K, Default) ->
-  case application:get_env (mondemand, vmstats) of
+get_config_with_default (M, K, Default) ->
+  case application:get_env (mondemand, M) of
     {ok, L} when is_list (L) ->
       case proplists:get_value (K, L) of
         undefined -> Default;
