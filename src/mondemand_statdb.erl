@@ -42,59 +42,45 @@
 
 %% API
 -export([ start_link/0,
-          get_state/0,
 
           % counter functions
-          create_counter/2,
-          create_counter/3,
-          create_counter/4,
           create_counter/5,
-          increment/2,
-          increment/3,
-          increment/4,
-          fetch_counter/2,
+          increment_counter/4,
           fetch_counter/3,
-          remove_counter/2,
           remove_counter/3,
 
           % gcounter functions
-          create_gcounter/4,
-          gincrement/4,
-          fetch_gcounter/2,
+          create_gcounter/5,
+          increment_gcounter/4,
           fetch_gcounter/3,
+          remove_gcounter/3,
 
           % gauge functions
-          create_gauge/2,
-          create_gauge/3,
-          create_gauge/4,
           create_gauge/5,
-          set/3,
-          set/4,
-          fetch_gauge/2,
+          set_gauge/4,
           fetch_gauge/3,
-          remove_gauge/2,
           remove_gauge/3,
 
           % sample set functions
-          create_sample_set/2,
-          create_sample_set/3,
-          create_sample_set/4,
-          create_sample_set/5,
           create_sample_set/6,
-          add_sample/3,
           add_sample/4,
-          fetch_sample_set/2,
           fetch_sample_set/3,
           fetch_sample_set/4,
-          remove_sample_set/2,
           remove_sample_set/3,
-
           all_sample_set_stats/0,
 
+          % mapping functions, used to iterate over all stats, when now is used
+          % the current live dbs for all types are used, when then functions
+          % are used the db for however many minutes ago is used.
           map_now/1,
+          map_now/2,
           map_then/2,
+          map_then/3,
           map/4,
 
+          add_raw/3, % (ProgId, Context, StatsMsg)
+          foldl_raw/2,  % (Function/2, Accumulator0) -> AccumulatorN
+          description/1,
           flush/3,
           config/0,
           all/0,
@@ -121,6 +107,18 @@
                   max_sample_size,
                   statistics
                  }).
+
+% The raw db is used when raw stats are sent via mondemand:send_stats/3.
+% The key is the prog_id and the context list as that should be the same
+% from one call to the next.  The values kept are the collect_time which
+% will be the time mondemand:send_stats/3 is called, and the 
+-record (raw_key, {prog_id,
+                   context = []
+                  }).
+-record (raw_entry, {key, statsmsg}).
+-define (RAW_KEY_INDEX, #raw_entry.key).
+-define (RAW_TABLE, md_raw).
+
 -record (map_state, {host, collect_time, stats_set_table, user_state}).
 
 -define (STATS_TABLE,  md_stats).
@@ -146,46 +144,25 @@
 start_link() ->
   gen_server:start_link ({local, ?MODULE}, ?MODULE, [], []).
 
-get_state() ->
-  gen_server:call (?MODULE, get_state).
-
-create_counter (ProgId, Key) ->
-  create_counter (ProgId, Key, [], "", 0).
-create_counter (ProgId, Key, Description) ->
-  create_counter (ProgId, Key, [], Description, 0).
-create_counter (ProgId, Key, Context, Description) ->
-  create_counter (ProgId, Key, Context, Description, 0).
-create_counter (ProgId, Key, Context, Description, Amount)
-  when is_integer (Amount), is_list (Context) ->
+create_counter (ProgId, Key, Context, Description, InitialAmount)
+  when is_integer (InitialAmount), is_list (Context) ->
   InternalKey = calculate_key (ProgId, Context, counter, Key),
   add_new_config (InternalKey, Description),
   case ets:insert_new (?STATS_TABLE,
-                       #md_metric {key = InternalKey, value = Amount}) of
+                       #md_metric {key = InternalKey, value = InitialAmount}) of
     true -> ok;
     false -> {error, already_created}
   end.
 
-increment (ProgId, Key) ->
-  increment (ProgId, Key, [], 1).
-increment (ProgId, Key, Amount)
-  when is_integer (Amount) ->
-  increment (ProgId, Key, [], Amount);
-increment (ProgId, Key, Context)
-  when is_list (Context) ->
-  increment (ProgId, Key, Context, 1).
-increment (ProgId, Key, Context, Amount)
+increment_counter (ProgId, Key, Context, Amount)
   when is_integer (Amount), is_list (Context) ->
   InternalKey = calculate_key (ProgId, Context, counter, Key),
   try_update_counter (InternalKey, Amount).
 
-fetch_counter (ProgId, Key) ->
-  fetch_counter (ProgId, Key, []).
 fetch_counter (ProgId, Key, Context) ->
   InternalKey = calculate_key (ProgId, Context, counter, Key),
   return_if_exists (InternalKey, ?STATS_TABLE).
 
-remove_counter (ProgId, Key) ->
-  remove_counter (ProgId, Key, []).
 remove_counter (ProgId, Key, Context) ->
   InternalKey = calculate_key (ProgId, Context, counter, Key),
   remove_metric (InternalKey, ?STATS_TABLE).
@@ -240,14 +217,15 @@ try_update_counter (InternalKey =
           previous_value :: non_neg_integer(),
           previous_time :: integer() }).
 
-create_gcounter (ProgId, Key, Context, Amount)
-  when is_list(Context), is_integer(Amount) ->
-  create_gcounter (calculate_key (ProgId, Context, gcounter, Key), Amount).
+create_gcounter (ProgId, Key, Context, Description, InitialAmount)
+  when is_list(Context), is_integer(InitialAmount) ->
+  InternalKey = calculate_key (ProgId, Context, gcounter, Key),
+  create_gcounter_internal (InternalKey, Description, InitialAmount).
 
-create_gcounter (InternalKey, Amount) ->
-  add_new_config (InternalKey, ""),
+create_gcounter_internal (InternalKey, Description, InitialAmount) ->
+  add_new_config (InternalKey, Description),
   NewGCounter = #md_gcounter{ key = InternalKey,
-                              value = Amount,
+                              value = InitialAmount,
                               previous_value = 0,
                               previous_time = erlang:monotonic_time() },
   case ets:insert_new (?STATS_TABLE, NewGCounter) of
@@ -255,7 +233,7 @@ create_gcounter (InternalKey, Amount) ->
     false -> {error, already_created}
   end.
 
-gincrement (ProgId, Key, Context, Amount)
+increment_gcounter (ProgId, Key, Context, Amount)
   when is_integer (Amount), is_list (Context) ->
   InternalKey = calculate_key (ProgId, Context, gcounter, Key),
   update_gcounter (InternalKey, Amount).
@@ -270,37 +248,31 @@ update_gcounter (InternalKey, Amount) ->
     %% default object to the original ets:update_counter call so that we can
     %% create the config row.
     error:badarg ->
-      case create_gcounter (InternalKey, Amount) of
+      case create_gcounter_internal (InternalKey, "", Amount) of
         ok                       -> {ok, Amount};
         {error, already_created} -> {ok, update_counter (InternalKey, Amount)}
       end
   end.
 
-fetch_gcounter (ProgId, Key) ->
-  fetch_gcounter (ProgId, Key, []).
 fetch_gcounter (ProgId, Key, Context) ->
   InternalKey = calculate_key (ProgId, Context, gcounter, Key),
   return_if_exists (InternalKey, ?STATS_TABLE).
 
+remove_gcounter (ProgId, Key, Context) ->
+  InternalKey = calculate_key (ProgId, Context, gcounter, Key),
+  remove_metric (InternalKey, ?STATS_TABLE).
 
-create_gauge (ProgId, Key) ->
-  create_gauge (ProgId, Key, [], "", 0).
-create_gauge (ProgId, Key, Description) ->
-  create_gauge (ProgId, Key, [], Description, 0).
-create_gauge (ProgId, Key, Context, Description) ->
-  create_gauge (ProgId, Key, Context, Description, 0).
-create_gauge (ProgId, Key, Context, Description, Amount) ->
+create_gauge (ProgId, Key, Context, Description, InitialAmount)
+  when is_integer (InitialAmount), is_list (Context) ->
   InternalKey = calculate_key (ProgId, Context, gauge, Key),
   add_new_config (InternalKey, Description),
   case ets:insert_new (?STATS_TABLE,
-                       #md_metric {key = InternalKey, value = Amount}) of
+                       #md_metric {key = InternalKey, value = InitialAmount}) of
     true -> ok;
     false -> {error, already_created}
   end.
 
-set (ProgId, Key, Amount) ->
-  set (ProgId, Key, [], Amount).
-set (ProgId, Key, Context, Amount) ->
+set_gauge (ProgId, Key, Context, Amount) ->
   InternalKey = calculate_key (ProgId, Context, gauge, Key),
 
   % if we would overflow a gauge, instead of going negative just leave it
@@ -328,14 +300,10 @@ set (ProgId, Key, Context, Amount) ->
       end
   end.
 
-fetch_gauge (ProgId, Key) ->
-  fetch_gauge (ProgId, Key, []).
 fetch_gauge (ProgId, Key, Context) ->
   InternalKey = calculate_key (ProgId, Context, gauge, Key),
   return_if_exists (InternalKey, ?STATS_TABLE).
 
-remove_gauge (ProgId, Key) ->
-  remove_gauge (ProgId, Key, []).
 remove_gauge (ProgId, Key, Context) ->
   InternalKey = calculate_key (ProgId, Context, gauge, Key),
   remove_metric (InternalKey, ?STATS_TABLE).
@@ -364,22 +332,9 @@ try_update_gauge (InternalKey =
       end
   end.
 
-create_sample_set (ProgId, Key) ->
-  create_sample_set (ProgId, Key, [], "",
-                     mondemand_config:default_max_sample_size(),
-                     mondemand_config:default_stats()).
-create_sample_set (ProgId, Key, Description) ->
-  create_sample_set (ProgId, Key, [], Description,
-                     mondemand_config:default_max_sample_size(),
-                     mondemand_config:default_stats()).
-create_sample_set (ProgId, Key, Context, Description) ->
-  create_sample_set (ProgId, Key, Context, Description,
-                     mondemand_config:default_max_sample_size(),
-                     mondemand_config:default_stats()).
-create_sample_set (ProgId, Key, Context, Description, Max) ->
-  create_sample_set (ProgId, Key, Context, Description,
-                     Max,
-                     mondemand_config:default_stats()).
+create_sample_set (ProgId, Key, Context, Description, Max, all) ->
+  create_sample_set (ProgId, Key, Context, Description, Max,
+                     all_sample_set_stats());
 create_sample_set (ProgId, Key, Context, Description, Max, Stats) ->
   InternalKey = calculate_key (ProgId, Context, statset, Key),
   create_sample_set_internal (minute_tab (mondemand_util:current_minute()),
@@ -429,9 +384,6 @@ try_update_sampleset (CurrentMinuteStatsSetTable, InternalKey, Value) ->
       [M, UC]
   end.
 
-add_sample (ProgId, Key, Value) ->
-  add_sample (ProgId, Key, [], Value).
-
 % this implements reservoir sampling of values
 %   http://en.wikipedia.org/wiki/Reservoir_sampling
 % in an ets table
@@ -473,9 +425,6 @@ add_sample (ProgId, Key, Context, Value) ->
     I -> ets:update_element (Tid, InternalKey, {?STATSET_SUM_INDEX+I,Value})
   end.
 
-fetch_sample_set (ProgId, Key) ->
-  fetch_sample_set (ProgId, Key, []).
-
 fetch_sample_set (ProgId, Key, Context) ->
   fetch_sample_set (ProgId, Key, Context, mondemand_util:current_minute()).
 
@@ -484,8 +433,6 @@ fetch_sample_set (ProgId, Key, Context, Minute) ->
   CurrentMinuteStatsSetTable= minute_tab (Minute),
   return_if_exists (InternalKey, CurrentMinuteStatsSetTable).
 
-remove_sample_set (ProgId, Key) ->
-  remove_sample_set (ProgId, Key, []).
 remove_sample_set (ProgId, Key, Context) ->
   InternalKey = calculate_key (ProgId, Context, statset, Key),
   CurrentMinuteStatsSetTable = minute_tab (mondemand_util:current_minute()),
@@ -516,6 +463,12 @@ lookup_default_config () ->
   case ets:lookup (?CONFIG_TABLE, '$default_config') of
     [C = #config {}] -> C;
     [] -> undefined
+  end.
+
+description(InternalKey) ->
+  case ets:lookup (?CONFIG_TABLE, InternalKey) of
+    [] -> "";
+    [#config { description = D}] -> D
   end.
 
 add_new_config (Key, Description) ->
@@ -557,16 +510,20 @@ type_to_single_char (gcounter) -> <<"r">>;
 type_to_single_char (statset) -> <<"s">>.
 
 map_now (Function) ->
-  CurrentMinuteMillis = mondemand_util:current(),
-  StatsSetTable = minute_tab (mondemand_util:current_minute()),
-  map (Function, ok, CurrentMinuteMillis, StatsSetTable).
+  map_now (Function, ok).
+
+map_now (Function, InitialState) ->
+  map_then (Function, InitialState, 0).
 
 map_then (Function, Ago) ->
+  map_then (Function, ok, Ago).
+
+map_then (Function, InitialState, Ago) ->
   CurrentMinuteMillis = mondemand_util:current(),
   PreviousMinuteMillis = CurrentMinuteMillis - 60000 * Ago,
   PreviousMinute = minutes_ago (mondemand_util:current_minute(), Ago),
   StatsSetTable = minute_tab (PreviousMinute),
-  map (Function, ok, PreviousMinuteMillis, StatsSetTable).
+  map (Function, InitialState, PreviousMinuteMillis, StatsSetTable).
 
 % I want to iterate over the config table, collapsing all metrics for a
 % particular program id and context into a group so they can all be processed
@@ -665,33 +622,43 @@ lookup_metric (InternalKey = #mdkey {type = Type, key = Key},
                CurrentMinuteStatsSetTable) ->
   case Type of
     I when I =:= counter; I =:= gauge; I =:= gcounter ->
+      Description = description(InternalKey),
       case ets:lookup (?STATS_TABLE, InternalKey) of
         [] ->
           #md_metric { key = mondemand_util:binaryify (Key),
                        type = I,
-                       value = 0 };
+                       value = 0,
+                       description = Description,
+                       collect_time = mondemand_util:millis_since_epoch() };
         [#md_metric {value = V}] ->
           #md_metric { key = mondemand_util:binaryify (Key),
                        type = I,
-                       value = V };
+                       value = V,
+                       description = Description,
+                       collect_time = mondemand_util:millis_since_epoch() };
         [#md_gcounter {rate = V}] ->
           #md_metric { key = mondemand_util:binaryify (Key),
                        type = gauge,
-                       value = V }
+                       value = V,
+                       description = Description,
+                       collect_time = mondemand_util:millis_since_epoch() }
       end;
     I when I =:= statset ->
-      #config { statistics = Stats } = lookup_config (InternalKey),
+      #config { statistics = Stats, description = Description }
+        = lookup_config (InternalKey),
       case ets:lookup (CurrentMinuteStatsSetTable, InternalKey) of
         [] ->
           % special case, for filling out an empty statset
           #md_metric { key = mondemand_util:binaryify (Key),
                        type = I,
-                       value = statset (0, 0, 0, 0, [], Stats)
+                       value = statset (0, 0, 0, 0, [], Stats),
+                       description = Description
                      };
         [Entry] ->
           #md_metric { key = mondemand_util:binaryify (Key),
                        type = I,
-                       value = ets_to_statset (Entry, Stats)
+                       value = ets_to_statset (Entry, Stats),
+                       description = Description
                      }
       end
   end.
@@ -754,6 +721,19 @@ all () ->
              State
            end).
 
+add_raw (ProgId, Context, StatsMsg) ->
+  CollectTime = mondemand_util:millis_since_epoch(),
+  Key = #raw_key {prog_id = ProgId, context = Context},
+  StatsMsgWithTime = mondemand_statsmsg:collect_time(StatsMsg,CollectTime),
+  ets:insert (?RAW_TABLE, #raw_entry{key = Key, statsmsg = StatsMsgWithTime}).
+
+foldl_raw (Function, InitialState) ->
+  ets:foldl(fun(#raw_entry {statsmsg = SM}, A) ->
+              Function(SM, A)
+            end,
+            InitialState,
+            ?RAW_TABLE).
+
 %-=====================================================================-
 %-                        gen_server callbacks                         -
 %-=====================================================================-
@@ -797,10 +777,16 @@ init([]) ->
                            {read_concurrency, false},
                            {keypos, ?METRIC_KEY_INDEX}
                          ]),
+  % also a table to keep track of raw stats passed to mondemand
+  ets:new (?RAW_TABLE, [ set,
+                         public,
+                         named_table,
+                         {write_concurrency, true},
+                         {read_concurrency, false},
+                         {keypos, ?RAW_KEY_INDEX}
+                       ]),
   {ok, #state {}}.
 
-handle_call (get_state, _From, State) ->
-  {reply, State, State};
 handle_call (_Request, _From, State) ->
   {reply, ok, State}.
 
@@ -1096,112 +1082,114 @@ config_perf_test_ () ->
     fun cleanup/1,
     [
       % tests using create_counter first
-      ?_assertEqual (undefined, fetch_counter (my_prog1, my_metric1)),
-      ?_assertEqual (ok, create_counter (my_prog1, my_metric1)),
-      ?_assertEqual ({error, already_created}, create_counter (my_prog1, my_metric1)),
-      ?_assertEqual (0, fetch_counter (my_prog1, my_metric1)),
-      ?_assertEqual ({ok,1}, increment (my_prog1, my_metric1)),
-      ?_assertEqual (1, fetch_counter (my_prog1, my_metric1)),
-      ?_assertEqual ({ok,2}, increment (my_prog1, my_metric1)),
-      ?_assertEqual ({ok,3}, increment (my_prog1, my_metric1)),
-      ?_assertEqual ({ok,4}, increment (my_prog1, my_metric1)),
-      ?_assertEqual (4, fetch_counter (my_prog1, my_metric1)),
-      ?_assertEqual (true, remove_counter (my_prog1, my_metric1)),
-      ?_assertEqual (undefined, fetch_counter (my_prog1, my_metric1)),
+      ?_assertEqual (undefined, fetch_counter (my_prog1, my_metric1,[])),
+      ?_assertEqual (ok, create_counter (my_prog1, my_metric1,[],"",0)),
+      ?_assertEqual ({error, already_created}, create_counter (my_prog1, my_metric1,[],"",0)),
+      ?_assertEqual (0, fetch_counter (my_prog1, my_metric1,[])),
+      ?_assertEqual ({ok,1}, increment_counter (my_prog1, my_metric1,[],1)),
+      ?_assertEqual (1, fetch_counter (my_prog1, my_metric1,[])),
+      ?_assertEqual ({ok,2}, increment_counter (my_prog1, my_metric1,[],1)),
+      ?_assertEqual ({ok,3}, increment_counter (my_prog1, my_metric1,[],1)),
+      ?_assertEqual ({ok,4}, increment_counter (my_prog1, my_metric1,[],1)),
+      ?_assertEqual (4, fetch_counter (my_prog1, my_metric1,[])),
+      ?_assertEqual (true, remove_counter (my_prog1, my_metric1,[])),
+      ?_assertEqual (undefined, fetch_counter (my_prog1, my_metric1,[])),
 
       % test creation with descriptions
-      ?_assertEqual (ok, create_counter (my_prog1, my_metric2, "with description")),
-      ?_assertEqual ({ok,1}, increment (my_prog1, my_metric2)),
-      ?_assertEqual (1, fetch_counter (my_prog1, my_metric2)),
-      ?_assertEqual (true, remove_counter (my_prog1, my_metric2)),
-      ?_assertEqual (undefined, fetch_counter (my_prog1, my_metric2)),
+      ?_assertEqual (ok, create_counter (my_prog1, my_metric2, [], "with description", 0)),
+      ?_assertEqual ({ok,1}, increment_counter (my_prog1, my_metric2,[],1)),
+      ?_assertEqual (1, fetch_counter (my_prog1, my_metric2,[])),
+      ?_assertEqual (true, remove_counter (my_prog1, my_metric2,[])),
+      ?_assertEqual (undefined, fetch_counter (my_prog1, my_metric2,[])),
 
       % test with contexts and descriptions
-      ?_assertEqual (ok, create_counter (my_prog1, my_metric3, [{foo,bar}], "with context")),
-      ?_assertEqual ({ok,1}, increment (my_prog1, my_metric3,[{foo,bar}])),
+      ?_assertEqual (ok, create_counter (my_prog1, my_metric3, [{foo,bar}], "with context",0)),
+      ?_assertEqual ({ok,1}, increment_counter (my_prog1, my_metric3,[{foo,bar}],1)),
       ?_assertEqual (1, fetch_counter (my_prog1, my_metric3,[{foo,bar}])),
       ?_assertEqual (true, remove_counter (my_prog1, my_metric3,[{foo,bar}])),
       ?_assertEqual (undefined, fetch_counter (my_prog1, my_metric3,[{foo,bar}])),
 
       % test using automatic creation of counters
-      ?_assertEqual (undefined, fetch_counter (my_prog1, my_metric1)),
-      ?_assertEqual ({ok,1}, increment (my_prog1, my_metric1)),
-      ?_assertEqual (1, fetch_counter (my_prog1, my_metric1)),
-      ?_assertEqual (true, remove_counter (my_prog1, my_metric1)),
-      ?_assertEqual (undefined, fetch_counter (my_prog1, my_metric1)),
+      ?_assertEqual (undefined, fetch_counter (my_prog1, my_metric1,[])),
+      ?_assertEqual ({ok,1}, increment_counter (my_prog1, my_metric1,[],1)),
+      ?_assertEqual (1, fetch_counter (my_prog1, my_metric1,[])),
+      ?_assertEqual (true, remove_counter (my_prog1, my_metric1,[])),
+      ?_assertEqual (undefined, fetch_counter (my_prog1, my_metric1,[])),
 
       {"counter wrapping",
        fun () ->
-         ?assertEqual ({ok, ?MD_STATS_MAX_METRIC_VALUE - 80}, increment (my_prog1, wrapctr, ?MD_STATS_MAX_METRIC_VALUE - 80)),
-         ?assertEqual ({ok, ?MD_STATS_MAX_METRIC_VALUE - 1}, increment (my_prog1, wrapctr, 79)),
-         ?assertEqual ({ok, ?MD_STATS_MAX_METRIC_VALUE}, increment (my_prog1, wrapctr, 1)),
-         ?assertEqual ({ok, 0}, increment (my_prog1, wrapctr, 1)),
-         ?assertEqual ({ok, ?MD_STATS_MAX_METRIC_VALUE - 10}, increment (my_prog1, wrapctr, ?MD_STATS_MAX_METRIC_VALUE - 10)),
-         ?assertEqual ({ok, 3}, increment (my_prog1, wrapctr, 14)),
-         ?assertEqual ({ok, 0}, increment (my_prog1, wrapctr, -3)),
-         ?assertEqual ({ok, ?MD_STATS_MIN_METRIC_VALUE}, increment (my_prog1, wrapctr, ?MD_STATS_MIN_METRIC_VALUE)),
-         ?assertEqual ({ok, 0}, increment (my_prog1, wrapctr, -1)),
+         ?assertEqual ({ok, ?MD_STATS_MAX_METRIC_VALUE - 80}, increment_counter (my_prog1, wrapctr, [], ?MD_STATS_MAX_METRIC_VALUE - 80)),
+         ?assertEqual ({ok, ?MD_STATS_MAX_METRIC_VALUE - 1}, increment_counter (my_prog1, wrapctr, [], 79)),
+         ?assertEqual ({ok, ?MD_STATS_MAX_METRIC_VALUE}, increment_counter (my_prog1, wrapctr, [], 1)),
+         ?assertEqual ({ok, 0}, increment_counter (my_prog1, wrapctr, [], 1)),
+         ?assertEqual ({ok, ?MD_STATS_MAX_METRIC_VALUE - 10}, increment_counter (my_prog1, wrapctr, [], ?MD_STATS_MAX_METRIC_VALUE - 10)),
+         ?assertEqual ({ok, 3}, increment_counter (my_prog1, wrapctr, [], 14)),
+         ?assertEqual ({ok, 0}, increment_counter (my_prog1, wrapctr, [], -3)),
+         ?assertEqual ({ok, ?MD_STATS_MIN_METRIC_VALUE}, increment_counter (my_prog1, wrapctr, [], ?MD_STATS_MIN_METRIC_VALUE)),
+         ?assertEqual ({ok, 0}, increment_counter (my_prog1, wrapctr, [], -1)),
          % always wrap to zero
-         ?assertEqual ({ok, ?MD_STATS_MIN_METRIC_VALUE}, increment (my_prog1, wrapctr, ?MD_STATS_MIN_METRIC_VALUE)),
-         ?assertEqual ({ok, 0}, increment (my_prog1, wrapctr, -10)),
-         ?assertEqual (true, remove_counter (my_prog1, wrapctr))
+         ?assertEqual ({ok, ?MD_STATS_MIN_METRIC_VALUE}, increment_counter (my_prog1, wrapctr, [], ?MD_STATS_MIN_METRIC_VALUE)),
+         ?assertEqual ({ok, 0}, increment_counter (my_prog1, wrapctr, [], -10)),
+         ?assertEqual (true, remove_counter (my_prog1, wrapctr, []))
        end
       },
 
       % tests using create_gauge first
-      ?_assertEqual (undefined, fetch_gauge (my_prog1, my_metric1)),
-      ?_assertEqual (ok, create_gauge (my_prog1, my_metric1)),
-      ?_assertEqual ({error, already_created}, create_gauge (my_prog1, my_metric1)),
-      ?_assertEqual (0, fetch_gauge (my_prog1, my_metric1)),
-      ?_assertEqual (ok, set (my_prog1, my_metric1, 5)),
-      ?_assertEqual (5, fetch_gauge (my_prog1, my_metric1)),
-      ?_assertEqual (ok, set (my_prog1, my_metric1, 6)),
-      ?_assertEqual (ok, set (my_prog1, my_metric1, 4)),
-      ?_assertEqual (4, fetch_gauge (my_prog1, my_metric1)),
-      ?_assertEqual (true, remove_gauge (my_prog1, my_metric1)),
-      ?_assertEqual (undefined, fetch_gauge (my_prog1, my_metric1)),
+      ?_assertEqual (undefined, fetch_gauge (my_prog1, my_metric1,[])),
+      ?_assertEqual (ok, create_gauge (my_prog1, my_metric1,[],"",0)),
+      ?_assertEqual ({error, already_created}, create_gauge (my_prog1, my_metric1,[],"",0)),
+      ?_assertEqual (0, fetch_gauge (my_prog1, my_metric1,[])),
+      ?_assertEqual (ok, set_gauge (my_prog1, my_metric1, [], 5)),
+      ?_assertEqual (5, fetch_gauge (my_prog1, my_metric1,[])),
+      ?_assertEqual (ok, set_gauge (my_prog1, my_metric1,[],6)),
+      ?_assertEqual (ok, set_gauge (my_prog1, my_metric1,[],4)),
+      ?_assertEqual (4, fetch_gauge (my_prog1, my_metric1,[])),
+      ?_assertEqual (true, remove_gauge (my_prog1, my_metric1,[])),
+      ?_assertEqual (undefined, fetch_gauge (my_prog1, my_metric1,[])),
 
       {"gcounter",
        fun () ->
          ?assertEqual (#md_metric.key, #md_gcounter.key),
          ?assertEqual (#md_metric.value, #md_gcounter.value),
-         ?assertEqual (undefined, fetch_gcounter(my_prog1, gctr)),
-         ?assertEqual ({ok, 1}, gincrement (my_prog1, gctr, [], 1)),
-         ?assertEqual ({ok, 4}, gincrement (my_prog1, gctr, [], 3)),
-         ?assertEqual (0, fetch_gcounter(my_prog1, gctr)),
+         ?assertEqual (undefined, fetch_gcounter(my_prog1, gctr,[])),
+         ?assertEqual ({ok, 1}, increment_gcounter (my_prog1, gctr, [], 1)),
+         ?assertEqual ({ok, 4}, increment_gcounter (my_prog1, gctr, [], 3)),
+         ?assertEqual (0, fetch_gcounter(my_prog1, gctr,[])),
          Key = calculate_key(my_prog1, [], gcounter, gctr),
          finalize_metric(Key, ?STATS_TABLE),
          ?assertMatch (V when is_number(V) andalso V >= 4,
-                       fetch_gcounter(my_prog1, gctr)),
+                       fetch_gcounter(my_prog1, gctr,[])),
          ?assertMatch (#md_metric{type = gauge, value = V} when is_number(V) andalso V >= 4,
                        lookup_metric(Key, ?STATS_TABLE)),
-         %% No gincrement in period => rate == 0.
+         %% No increment_gcounter in period => rate == 0.
          finalize_metric(Key, ?STATS_TABLE),
-         ?assertEqual (0, fetch_gcounter(my_prog1, gctr)),
+         ?assertEqual (0, fetch_gcounter(my_prog1, gctr,[])),
          %% Test that rate is not negative when counter wraps.
-         gincrement (my_prog1, gctr, [], ?MD_STATS_MAX_METRIC_VALUE - 80),
+         increment_gcounter (my_prog1, gctr, [], ?MD_STATS_MAX_METRIC_VALUE - 80),
          finalize_metric(Key, ?STATS_TABLE),
-         gincrement (my_prog1, gctr, [], 150),
+         increment_gcounter (my_prog1, gctr, [], 150),
          finalize_metric(Key, ?STATS_TABLE),
          ?assertMatch (V when is_number(V) andalso V > 0,
-                      fetch_gcounter(my_prog1, gctr))
+                      fetch_gcounter(my_prog1, gctr,[]))
        end
       },
 
       % tests using sample sets
-      ?_assertEqual (undefined, fetch_sample_set (my_prog1, my_metric1)),
+      ?_assertEqual (undefined, fetch_sample_set (my_prog1, my_metric1,[])),
       % default size is 10
-      ?_assertEqual (ok, create_sample_set (my_prog1, my_metric1)),
+      ?_assertEqual (ok, create_sample_set (my_prog1, my_metric1,[],"",
+                                           mondemand_config:default_max_sample_size(),
+                                           mondemand_config:default_stats())),
       % add some
       fun () ->
         [
-          ?assertEqual (true, add_sample (my_prog1, my_metric1, N))
+          ?assertEqual (true, add_sample (my_prog1, my_metric1, [], N))
           || N <- lists:seq (1, 5)
         ]
       end,
       % check their values
       fun () ->
-        SS = fetch_sample_set (my_prog1, my_metric1),
+        SS = fetch_sample_set (my_prog1, my_metric1, []),
         ?assertEqual (5, mondemand_statsmsg:get_statset (count, SS)),
         ?assertEqual (15, mondemand_statsmsg:get_statset (sum, SS)),
         ?assertEqual (1, mondemand_statsmsg:get_statset (min, SS)),
@@ -1210,12 +1198,12 @@ config_perf_test_ () ->
       % add a few more
       fun () ->
         [
-          ?assertEqual (true, add_sample (my_prog1, my_metric1, N))
+          ?assertEqual (true, add_sample (my_prog1, my_metric1,[], N))
           || N <- lists:seq (6, 20)
         ]
       end,
       fun () ->
-        SS = fetch_sample_set (my_prog1, my_metric1),
+        SS = fetch_sample_set (my_prog1, my_metric1,[]),
         ?assertEqual (20, mondemand_statsmsg:get_statset (count, SS)),
         ?assertEqual (lists:sum(lists:seq(1,20)),
                       mondemand_statsmsg:get_statset (sum, SS)),
@@ -1227,7 +1215,7 @@ config_perf_test_ () ->
         Max = mondemand_statsmsg:get_statset (max, SS),
         ?assertEqual (true, Max > 1)
       end,
-      ?_assertEqual (true, remove_sample_set (my_prog1, my_metric1)),
+      ?_assertEqual (true, remove_sample_set (my_prog1, my_metric1,[])),
       fun () ->
         ok = create_sample_set(foo,bar,[],"",100, all_sample_set_stats()),
         SS = fetch_sample_set(foo,bar,[]),
@@ -1237,13 +1225,13 @@ config_perf_test_ () ->
         % turns out there was a bug with median when there was only one
         % element in the set, so add one, then check the values are as
         % we expect
-        mondemand_statdb:add_sample(foo,bar,[],10),
+        add_sample(foo,bar,[],10),
         SS1 = fetch_sample_set(foo,bar,[]),
         [ ?assertEqual (10, mondemand_statsmsg:get_statset (S, SS1))
           || S <- all_sample_set_stats (), S =/= count, S =/= median ],
         ?assertEqual (1, mondemand_statsmsg:get_statset (count, SS1)),
         ?assertEqual (0, mondemand_statsmsg:get_statset (median, SS1)),
-        mondemand_statdb:remove_sample_set(foo,bar,[]),
+        remove_sample_set(foo,bar,[]),
 
         % then for completeness just check that all the values are what
         % we would expect for 100 samples
@@ -1261,7 +1249,7 @@ config_perf_test_ () ->
         ?assertEqual (95,mondemand_statsmsg:get_statset (pctl_95, SS2)),
         ?assertEqual (98,mondemand_statsmsg:get_statset (pctl_98, SS2)),
         ?assertEqual (99,mondemand_statsmsg:get_statset (pctl_99, SS2)),
-        mondemand_statdb:remove_sample_set(foo,bar,[])
+        remove_sample_set(foo,bar,[])
       end
     ]
   }.

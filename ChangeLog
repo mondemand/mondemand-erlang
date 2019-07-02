@@ -1,3 +1,9 @@
+* Mon Jul 01 2019 Anthony Molinaro <anthony.molinaro@openx.com> 7.0.0
+- Added extra field to #md_metric record for description (NOT BACKWARD
+COMPATIBLE if using this record)
+- Moved many functions from mondemand_statdb module to mondemand module
+- Added optional http server with prometheus exporter
+
 * Tue Jun 18 2019 Anthony Molinaro <anthony.molinaro@openx.com> 6.12.1
 - rename some confusing names
 - get mondemand_statdb:config() to print out parts of md_config table

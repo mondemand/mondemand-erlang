@@ -52,7 +52,9 @@
                        }).
 -record (md_metric, { type,
                       key,
-                      value
+                      value,
+                      description = "",
+                      collect_time = undefined
                     }).
 -record (md_statset, { count,
                        sum,

@@ -24,10 +24,15 @@
            default_stats/0,
            send_interval/0,
            lwes_config/0,
+           lwes_stats_disabled/0,
            minutes_to_keep/0,
            max_metrics/0,
            parse_config/1,
            get_http_config/0,
+           httpd_enabled/0,
+           httpd_port/0,
+           httpd_address/0,
+           httpd_metrics_endpoint/0,
            vmstats_enabled/0,
            vmstats_prog_id/0,
            vmstats_context/0,
@@ -47,6 +52,7 @@
 
 -define (MOCHI_SENDER_HOST, mondemand_sender_host_global).
 -define (MOCHI_MAX_METRICS, mondemand_max_metrics_global).
+-define (MOCHI_LWES_STATS_DISABLED, mondemand_lwes_stats_disabled).
 
 % this function is meant to be called before the supervisor and
 % pulls all those configs which are mostly static.
@@ -62,11 +68,18 @@ init () ->
       undefined -> ?DEFAULT_MAX_METRICS;
       {ok, M} -> M
     end,
-  mondemand_global:put (?MOCHI_MAX_METRICS, MaxMetrics).
+  mondemand_global:put (?MOCHI_MAX_METRICS, MaxMetrics),
+  LwesStatsDisabled =
+    case application:get_env (mondemand, lwes_stats_disabled) of
+      {ok, B} when is_boolean (B) -> B;
+      _ -> false
+    end,
+  mondemand_global:put (?MOCHI_LWES_STATS_DISABLED, LwesStatsDisabled).
 
 clear() ->
   mondemand_global:delete(?MOCHI_SENDER_HOST),
-  mondemand_global:delete(?MOCHI_MAX_METRICS).
+  mondemand_global:delete(?MOCHI_MAX_METRICS),
+  mondemand_global:delete(?MOCHI_LWES_STATS_DISABLED).
 
 host () ->
   mondemand_global:get (?MOCHI_SENDER_HOST).
@@ -127,6 +140,13 @@ lwes_config () ->
           [ {T, {1,[?DEFAULT_SEND_HOST_PORT]}} || T <- ?TYPES ]
       end
   end.
+
+% If you are using the prometheus exporter you probably don't want
+% to send lwes stats, but it's pretty baked in at the moment, so this
+% will be a simple way to just turn off emission of stats but otherwise
+% continue to function as normal
+lwes_stats_disabled() ->
+  mondemand_global:get (?MOCHI_LWES_STATS_DISABLED).
 
 valid_config (Config) when is_list (Config) ->
   lists:foldl (fun (T, A) ->
@@ -300,6 +320,21 @@ get_http_config () ->
       end
   end.
 
+httpd_enabled () ->
+  case application:get_env (mondemand, httpd) of
+    {ok, L} when is_list (L) -> true;
+    _ -> false
+  end.
+
+httpd_port () ->
+  get_config_with_default (httpd, port, 31337).
+
+httpd_address () ->
+  get_config_with_default (httpd, bind_address, "0.0.0.0").
+
+httpd_metrics_endpoint () ->
+  get_config_with_default (httpd, metrics_endpoint, "/md/metrics").
+
 vmstats_enabled () ->
   case application:get_env (mondemand, vmstats) of
     {ok, L} when is_list (L) ->
@@ -312,11 +347,11 @@ vmstats_enabled () ->
   end.
 
 vmstats_prog_id () ->
-  vmstats_config (program_id, undefined).
+  get_config_with_default (vmstats, program_id, undefined).
 vmstats_context () ->
-  vmstats_config (context, []).
+  get_config_with_default (vmstats, context, []).
 vmstats_disable_scheduler_wall_time () ->
-  vmstats_config (disable_scheduler_wall_time, false).
+  get_config_with_default (vmstats, disable_scheduler_wall_time, false).
 
 vmstats_legacy_workaround () ->
   case application:get_env(mondemand,r15b_workaround) of
@@ -324,8 +359,8 @@ vmstats_legacy_workaround () ->
     _ -> false
   end.
 
-vmstats_config (K, Default) ->
-  case application:get_env (mondemand, vmstats) of
+get_config_with_default (M, K, Default) ->
+  case application:get_env (mondemand, M) of
     {ok, L} when is_list (L) ->
       case proplists:get_value (K, L) of
         undefined -> Default;
