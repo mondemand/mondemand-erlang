@@ -460,11 +460,14 @@ send_annotation (Id, Time, Description, Text, Tags, Context) ->
 send_stats (_, _, []) ->
   ok;
 send_stats (ProgId, Context, Stats) ->
-  Event =
-    mondemand_statsmsg:to_lwes (
-      mondemand_statsmsg:new (ProgId, Context, Stats)
-    ),
-  send_event (Event).
+  StatsMsg = mondemand_statsmsg:new (ProgId, Context, Stats),
+  case not mondemand_config:lwes_stats_disabled() of
+    true ->
+      Event = mondemand_statsmsg:to_lwes (StatsMsg),
+      send_event (Event);
+    false ->
+      ok
+  end.
 
 flush ({FlushModule, FlushStatePrepFunction, FlushFunction}) ->
   case mondemand_config:vmstats_prog_id () of
@@ -645,10 +648,16 @@ send_event (Event = #lwes_event { name = Name }) ->
   gen_server:cast (?MODULE, {send, Name, lwes_event:to_binary (Event)}).
 
 flush_state_init () ->
-  ok.
+  % for flushing keep track of if stats are enabled and use that as the state
+  case not mondemand_config:lwes_stats_disabled() of
+    true -> true;
+    false -> false
+  end.
 
-flush_one_stat (StatsMsg, State) ->
+flush_one_stat (StatsMsg, true) ->
   send_event (mondemand_statsmsg:to_lwes (StatsMsg)),
+  true;
+flush_one_stat (_, State) ->
   State.
 
 open_all (Config) ->

@@ -24,6 +24,7 @@
            default_stats/0,
            send_interval/0,
            lwes_config/0,
+           lwes_stats_disabled/0,
            minutes_to_keep/0,
            max_metrics/0,
            parse_config/1,
@@ -51,6 +52,7 @@
 
 -define (MOCHI_SENDER_HOST, mondemand_sender_host_global).
 -define (MOCHI_MAX_METRICS, mondemand_max_metrics_global).
+-define (MOCHI_LWES_STATS_DISABLED, mondemand_lwes_stats_disabled).
 
 % this function is meant to be called before the supervisor and
 % pulls all those configs which are mostly static.
@@ -66,11 +68,18 @@ init () ->
       undefined -> ?DEFAULT_MAX_METRICS;
       {ok, M} -> M
     end,
-  mondemand_global:put (?MOCHI_MAX_METRICS, MaxMetrics).
+  mondemand_global:put (?MOCHI_MAX_METRICS, MaxMetrics),
+  LwesStatsDisabled =
+    case application:get_env (mondemand, lwes_stats_disabled) of
+      {ok, B} when is_boolean (B) -> B;
+      _ -> false
+    end,
+  mondemand_global:put (?MOCHI_LWES_STATS_DISABLED, LwesStatsDisabled).
 
 clear() ->
   mondemand_global:delete(?MOCHI_SENDER_HOST),
-  mondemand_global:delete(?MOCHI_MAX_METRICS).
+  mondemand_global:delete(?MOCHI_MAX_METRICS),
+  mondemand_global:delete(?MOCHI_LWES_STATS_DISABLED).
 
 host () ->
   mondemand_global:get (?MOCHI_SENDER_HOST).
@@ -131,6 +140,13 @@ lwes_config () ->
           [ {T, {1,[?DEFAULT_SEND_HOST_PORT]}} || T <- ?TYPES ]
       end
   end.
+
+% If you are using the prometheus exporter you probably don't want
+% to send lwes stats, but it's pretty baked in at the moment, so this
+% will be a simple way to just turn off emission of stats but otherwise
+% continue to function as normal
+lwes_stats_disabled() ->
+  mondemand_global:get (?MOCHI_LWES_STATS_DISABLED).
 
 valid_config (Config) when is_list (Config) ->
   lists:foldl (fun (T, A) ->
