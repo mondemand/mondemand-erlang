@@ -53,7 +53,7 @@
 -record (md_metric, { type,
                       key,
                       value,
-                      description
+                      description = ""
                     }).
 -record (md_statset, { count,
                        sum,

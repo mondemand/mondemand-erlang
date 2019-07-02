@@ -72,11 +72,6 @@ new (ProgId, Context, Metrics, Host) ->
   new (ProgId, Context, Metrics, Host, undefined).
 new (ProgId, Context, Metrics, Host, CollectTime) ->
   new (ProgId, Context, Metrics, Host, CollectTime, undefined).
-new (ProgId, Context, Metrics = [{_,_,_}|_], Host, CollectTime, SendTime) ->
-  ValidatedMetrics = [ #md_metric { type = T, key = K, value = V }
-                       || { T, K, V }
-                       <- Metrics ],
-  new (ProgId, Context, ValidatedMetrics, Host, CollectTime, SendTime);
 new (ProgId, Context, Metrics = [#md_metric{}|_],
      Host, CollectTime, SendTime) ->
   #md_stats_msg { collect_time = CollectTime,
@@ -87,7 +82,15 @@ new (ProgId, Context, Metrics = [#md_metric{}|_],
                   context = Context,
                   num_metrics = length (Metrics),
                   metrics = Metrics
-                }.
+                };
+new (ProgId, Context, Metrics = [M|_], Host, CollectTime, SendTime)
+  when is_tuple(M) ->
+  ValidatedMetrics =
+    lists:map(
+      fun({T,K,V}) -> #md_metric { type = T, key = K, value = V };
+         ({T,K,V,D}) -> #md_metric { type = T, key = K, value = V, description = D }
+      end, Metrics),
+  new (ProgId, Context, ValidatedMetrics, Host, CollectTime, SendTime).
 
 new_statset () -> #md_statset {}.
 
@@ -237,11 +240,17 @@ normalize_prometheus_name (Type, ProgramId, Key) when is_binary(Key) ->
   normalize_prometheus_name (Type, ProgramId, binary_to_list(Key));
 normalize_prometheus_name (Type, ProgramId, Key) ->
   case Type of
-    T when T =:= gauge ; T =:= statset -> [ProgramId, "_", Key];
+    T when T =:= gauge ; T =:= statset ->
+      [mondemand_util:stringify(ProgramId),
+       <<"_">>, mondemand_util:stringify(Key)];
     counter ->
       case lists:reverse(Key) of
-        [ $l,$a,$t,$o,$t,$_ | _] -> [ProgramId, "_", Key];
-        _ -> [ProgramId, "_", Key, "_total"]
+        [ $l,$a,$t,$o,$t,$_ | _] ->
+          [mondemand_util:stringify(ProgramId),
+           <<"_">>, mondemand_util:stringify(Key)];
+        _ ->
+          [mondemand_util:stringify(ProgramId),
+           <<"_">>, mondemand_util:stringify(Key),<<"_total">>]
       end
   end.
 
