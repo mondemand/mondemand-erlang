@@ -78,6 +78,8 @@
           map_then/3,
           map/4,
 
+          add_raw/3, % (ProgId, Context, StatsMsg)
+          foldl_raw/2,  % (Function/2, Accumulator0) -> AccumulatorN
           description/1,
           flush/3,
           config/0,
@@ -105,6 +107,18 @@
                   max_sample_size,
                   statistics
                  }).
+
+% The raw db is used when raw stats are sent via mondemand:send_stats/3.
+% The key is the prog_id and the context list as that should be the same
+% from one call to the next.  The values kept are the collect_time which
+% will be the time mondemand:send_stats/3 is called, and the 
+-record (raw_key, {prog_id,
+                   context = []
+                  }).
+-record (raw_entry, {key, statsmsg}).
+-define (RAW_KEY_INDEX, #raw_entry.key).
+-define (RAW_TABLE, md_raw).
+
 -record (map_state, {host, collect_time, stats_set_table, user_state}).
 
 -define (STATS_TABLE,  md_stats).
@@ -614,17 +628,20 @@ lookup_metric (InternalKey = #mdkey {type = Type, key = Key},
           #md_metric { key = mondemand_util:binaryify (Key),
                        type = I,
                        value = 0,
-                       description = Description };
+                       description = Description,
+                       collect_time = mondemand_util:millis_since_epoch() };
         [#md_metric {value = V}] ->
           #md_metric { key = mondemand_util:binaryify (Key),
                        type = I,
                        value = V,
-                       description = Description };
+                       description = Description,
+                       collect_time = mondemand_util:millis_since_epoch() };
         [#md_gcounter {rate = V}] ->
           #md_metric { key = mondemand_util:binaryify (Key),
                        type = gauge,
                        value = V,
-                       description = Description }
+                       description = Description,
+                       collect_time = mondemand_util:millis_since_epoch() }
       end;
     I when I =:= statset ->
       #config { statistics = Stats, description = Description }
@@ -704,6 +721,19 @@ all () ->
              State
            end).
 
+add_raw (ProgId, Context, StatsMsg) ->
+  CollectTime = mondemand_util:millis_since_epoch(),
+  Key = #raw_key {prog_id = ProgId, context = Context},
+  StatsMsgWithTime = mondemand_statsmsg:collect_time(StatsMsg,CollectTime),
+  ets:insert (?RAW_TABLE, #raw_entry{key = Key, statsmsg = StatsMsgWithTime}).
+
+foldl_raw (Function, InitialState) ->
+  ets:foldl(fun(#raw_entry {statsmsg = SM}, A) ->
+              Function(SM, A)
+            end,
+            InitialState,
+            ?RAW_TABLE).
+
 %-=====================================================================-
 %-                        gen_server callbacks                         -
 %-=====================================================================-
@@ -747,6 +777,14 @@ init([]) ->
                            {read_concurrency, false},
                            {keypos, ?METRIC_KEY_INDEX}
                          ]),
+  % also a table to keep track of raw stats passed to mondemand
+  ets:new (?RAW_TABLE, [ set,
+                         public,
+                         named_table,
+                         {write_concurrency, true},
+                         {read_concurrency, false},
+                         {keypos, ?RAW_KEY_INDEX}
+                       ]),
   {ok, #state {}}.
 
 handle_call (_Request, _From, State) ->

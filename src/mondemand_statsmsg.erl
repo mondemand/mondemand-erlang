@@ -38,6 +38,7 @@
           prog_id/1,
           host/1,
           collect_time/1,
+          collect_time/2,
           send_time/1,
           context/1,
           context_value/2,
@@ -254,59 +255,76 @@ normalize_prometheus_name (Type, ProgramId, Key) ->
       end
   end.
 
+determine_collect_time (ListOfTimes) when is_list(ListOfTimes) ->
+  case mondemand_util:first_defined(ListOfTimes) of
+    undefined -> mondemand_util:millis_since_epoch();
+    T -> T
+  end.
+
 metric_to_prometheus (ProgramId, Context,
                       #md_metric { key = Name, type = counter,
-                                   value = Value, description = Description },
-                      _CollectTime) ->
+                                   value = Value, description = Description,
+                                   collect_time = MetricCollectTime },
+                      MsgCollectTime) ->
   FinalName = normalize_prometheus_name(counter,ProgramId,Name),
   [ <<"# TYPE ">>, FinalName,<<" counter\n">>,
     <<"# HELP ">>, FinalName,<<" ">>,Description,<<"\n">>,
     FinalName, context_to_prometheus (Context),
-      <<" ">>, mondemand_util:stringify(Value,<<"0">>),<<"\n">> ];
+      <<" ">>, mondemand_util:stringify(Value,<<"0">>),
+      <<" ">>,mondemand_util:stringify(
+                determine_collect_time([MetricCollectTime, MsgCollectTime])),
+      <<"\n">> ];
 metric_to_prometheus (ProgramId, Context,
                       #md_metric { key = Name, type = gauge,
-                                   value = Value, description = Description },
-                      _CollectTime) ->
+                                   value = Value, description = Description,
+                                   collect_time = MetricCollectTime  },
+                      MsgCollectTime) ->
   FinalName = normalize_prometheus_name(gauge,ProgramId,Name),
   [ <<"# TYPE ">>, FinalName,<<" gauge\n">>,
     <<"# HELP ">>, FinalName,<<" ">>,Description,<<"\n">>,
     FinalName, context_to_prometheus (Context),
-      <<" ">>, mondemand_util:stringify(Value,<<"0">>),<<"\n">> ];
+      <<" ">>, mondemand_util:stringify(Value,<<"0">>),
+      <<" ">>,mondemand_util:stringify(
+                determine_collect_time([MetricCollectTime, MsgCollectTime])),
+      <<"\n">> ];
 metric_to_prometheus (ProgramId, Context,
                       #md_metric { key = Name, type = statset,
-                                   value = StatSet, description = Description },
-                      CollectTime) ->
+                                   value = StatSet, description = Description,
+                                   collect_time = MetricCollectTime },
+                      MsgCollectTime) ->
   FinalName = normalize_prometheus_name(statset,ProgramId,Name),
+  CollectTime = mondemand_util:stringify(
+                  determine_collect_time([MetricCollectTime, MsgCollectTime])),
   % use CollectTime in this case as it's a minute ago for statsets
   [ <<"# TYPE ">>, FinalName,<<" summary\n">>,
     <<"# HELP ">>, FinalName,<<" ">>,Description,<<"\n">>,
     FinalName, context_to_prometheus([{<<"quantile">>,<<"0.5">>} | Context]),
       <<" ">>,mondemand_util:stringify(StatSet#md_statset.median,<<"0">>),
-      <<" ">>,mondemand_util:stringify(CollectTime),<<"\n">>,
+      <<" ">>,CollectTime,<<"\n">>,
     FinalName, context_to_prometheus([{<<"quantile">>,<<"0.75">>} | Context]),
       <<" ">>,mondemand_util:stringify(StatSet#md_statset.pctl_75,<<"0">>),
-      <<" ">>,mondemand_util:stringify(CollectTime),<<"\n">>,
+      <<" ">>,CollectTime,<<"\n">>,
     FinalName, context_to_prometheus([{<<"quantile">>,<<"0.90">>} | Context]),
       <<" ">>,mondemand_util:stringify(StatSet#md_statset.pctl_90,<<"0">>),
-      <<" ">>,mondemand_util:stringify(CollectTime),<<"\n">>,
+      <<" ">>,CollectTime,<<"\n">>,
     FinalName, context_to_prometheus([{<<"quantile">>,<<"0.95">>} | Context]),
       <<" ">>,mondemand_util:stringify(StatSet#md_statset.pctl_95,<<"0">>),
-      <<" ">>,mondemand_util:stringify(CollectTime),<<"\n">>,
+      <<" ">>,CollectTime,<<"\n">>,
     FinalName, context_to_prometheus([{<<"quantile">>,<<"0.98">>} | Context]),
       <<" ">>,mondemand_util:stringify(StatSet#md_statset.pctl_98,<<"0">>),
-      <<" ">>,mondemand_util:stringify(CollectTime),<<"\n">>,
+      <<" ">>,CollectTime,<<"\n">>,
     FinalName, context_to_prometheus([{<<"quantile">>,<<"0.99">>} | Context]),
       <<" ">>,mondemand_util:stringify(StatSet#md_statset.pctl_99,<<"0">>),
-      <<" ">>,mondemand_util:stringify(CollectTime),<<"\n">>,
+      <<" ">>,CollectTime,<<"\n">>,
     FinalName, context_to_prometheus([{<<"quantile">>,<<"1.0">>} | Context]),
       <<" ">>,mondemand_util:stringify(StatSet#md_statset.max,<<"0">>),
-      <<" ">>,mondemand_util:stringify(CollectTime),<<"\n">>,
+      <<" ">>,CollectTime,<<"\n">>,
     FinalName,<<"_sum">>,context_to_prometheus(Context),
       <<" ">>,mondemand_util:stringify(StatSet#md_statset.sum,<<"0">>),
-      <<" ">>,mondemand_util:stringify(CollectTime),<<"\n">>,
+      <<" ">>,CollectTime,<<"\n">>,
     FinalName,<<"_count">>,context_to_prometheus(Context),
       <<" ">>,mondemand_util:stringify(StatSet#md_statset.count,<<"0">>),
-      <<" ">>,mondemand_util:stringify(CollectTime),<<"\n">>
+      <<" ">>,CollectTime,<<"\n">>
   ].
 
 to_prometheus (#md_stats_msg{ prog_id = ProgramId,
@@ -416,6 +434,7 @@ prog_id (#md_stats_msg { prog_id = ProgId }) -> ProgId.
 host (#md_stats_msg { host = Host }) -> Host.
 
 collect_time (#md_stats_msg { collect_time = CollectTime }) -> CollectTime.
+collect_time (M = #md_stats_msg {}, CollectTime) -> M#md_stats_msg { collect_time = CollectTime }.
 send_time (#md_stats_msg { send_time = SendTime }) -> SendTime.
 
 context (#md_stats_msg { context = Context }) -> Context.

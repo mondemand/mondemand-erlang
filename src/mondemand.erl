@@ -300,12 +300,21 @@ export_as_prometheus () ->
   % we export a 'minute ago' which actually just effects statsets.  This uses
   % the previous minutes statset db which will be complete and will export that
   % time as well
-  mondemand_statdb:map_then (
-    fun (S,A) ->
-      [mondemand_statsmsg:to_prometheus(S) | A]
-    end,
-    [],
-    1).
+  Stats =
+    mondemand_statdb:map_then (
+      fun (S,A) ->
+        [mondemand_statsmsg:to_prometheus(S) | A]
+      end,
+      [],
+      1),
+  Raw =
+    mondemand_statdb:foldl_raw (
+      fun (S, A) ->
+        SM = mondemand_statsmsg:to_prometheus(S),
+        [SM | A]
+      end,
+      Stats),
+  Raw.
 
 trace_info_in_dict (Dict) ->
   trace_owner_in_dict (Dict) andalso trace_id_in_dict (Dict).
@@ -461,6 +470,9 @@ send_stats (_, _, []) ->
   ok;
 send_stats (ProgId, Context, Stats) ->
   StatsMsg = mondemand_statsmsg:new (ProgId, Context, Stats),
+  % always add to raw cache
+  mondemand_statdb:add_raw(ProgId, Context, StatsMsg),
+  % only send to lwes if not disabled
   case not mondemand_config:lwes_stats_disabled() of
     true ->
       Event = mondemand_statsmsg:to_lwes (StatsMsg),
